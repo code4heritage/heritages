@@ -1,0 +1,59 @@
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  # クローラーからの通知 (repository_dispatch) は入れない (ADR 0015)。個人
+  # アカウントから org へ dispatch するトークンを、反映を数時間早めるためだけに
+  # 増やさない。月次更新 (毎月 2 日 03:00 JST) の後に空振り込みで走らせる。
+  schedule:
+    - cron: "0 22 2 * *" # 毎月 3 日 07:00 JST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 配信は 1 本ずつ。走っているデプロイは途中で止めない (中断すると配信が
+# 中途半端な状態で残りうる)。
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: ビルドを導入
+        run: pip install -e .
+
+      # データリポジトリは public なので github.token で読める (ADR 0015)。
+      - name: データリポジトリを取得
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-datasets.sh data-repos
+
+      # 不変条件が破れたらここで落ちる。既に配信されているサイトはそのまま残る。
+      - name: 組み立て
+        run: heritage-site build --data-dir data-repos --out dist
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
