@@ -21,6 +21,42 @@
     </header>
 
     <main id="main">
+      <section aria-labelledby="browse-heading" class="browse-section">
+        <h2 id="browse-heading">さがす</h2>
+        <p id="browse-loading" class="summary">一覧を読み込んでいます…</p>
+        <p id="browse-error" class="error" hidden></p>
+
+        <div id="browse" hidden>
+          <form class="search" role="search" onsubmit="return false">
+            <label for="search">名称・ふりがな・棟名・所在地から</label>
+            <input
+              id="search"
+              type="search"
+              autocomplete="off"
+              placeholder="例: 東大寺 / とうだいじ / 京都市"
+            />
+            <button id="reset" type="button">条件を消す</button>
+          </form>
+
+          <div class="browse-body">
+            <!--
+              絞り込みの軸は meta.json の facets から作る (ADR 0014)。軸の表を
+              ここに書かないので、種別が増えても HTML は変わらない。
+            -->
+            <div id="facets" class="facets" aria-label="絞り込み"></div>
+
+            <div class="results">
+              <p id="result-count" class="summary" tabindex="-1" aria-live="polite"></p>
+              <p id="no-results" class="empty" hidden>
+                条件に当てはまるものがありません。語を短くするか、選んだ条件を減らしてください。
+              </p>
+              <ol id="results" class="records"></ol>
+              <button id="more" type="button" class="more" hidden></button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section aria-labelledby="datasets-heading">
         <h2 id="datasets-heading">データセット</h2>
         <p id="summary" class="summary">読み込んでいます…</p>

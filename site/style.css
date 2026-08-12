@@ -120,3 +120,152 @@ thead th {
 a {
   color: var(--accent);
 }
+
+/* --- さがす (検索・ファセット・一覧) --- */
+
+.search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.search label {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.search input {
+  flex: 1 1 18rem;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+
+button {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+/* 広い画面では絞り込みを横に置く。狭ければ縦に積む (画面幅で切り替えるだけで、
+   どちらでも同じ順に読める)。 */
+.browse-body {
+  display: grid;
+  gap: 1.5rem;
+  grid-template-columns: minmax(14rem, 18rem) 1fr;
+  align-items: start;
+}
+
+@media (max-width: 48rem) {
+  .browse-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.facets {
+  font-size: 0.9rem;
+}
+
+.facet {
+  border-bottom: 1px solid var(--line);
+  padding: 0.4rem 0;
+}
+
+.facet > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.facet-chosen {
+  color: var(--accent);
+  font-weight: 400;
+}
+
+.facet-values {
+  margin: 0.4rem 0 0.2rem;
+}
+
+.facet-value {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.1rem 0;
+}
+
+.facet-label {
+  flex: 1 1 auto;
+}
+
+.facet-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.facet-more {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.records {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.record {
+  border-bottom: 1px solid var(--line);
+  padding: 0.6rem 0;
+}
+
+.record-name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.record-ridge {
+  color: var(--muted);
+}
+
+.record-meta {
+  margin: 0.1rem 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* 座標を持たない行を黙って落とさない (Issue #32 §3)。地図に出せないことを
+   一覧の側で示す。 */
+.record-note {
+  margin: 0.1rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.more {
+  margin-top: 1rem;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+#result-count:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
