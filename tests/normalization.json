@@ -1,0 +1,25 @@
+{
+  "comment": "検索文字列の正規化の事例表。src/heritage_site/search.py と site/normalize.js の両方をこの 1 つの表で突き合わせる (tests/test_search.py)。実例は国指定文化財等データベース由来のデータから採った。",
+  "cases": [
+    { "why": "均す必要のない語はそのまま", "input": "金堂", "expected": "金堂" },
+    { "why": "全角の英字を畳んで小文字にする (ＪＲ小樽駅本屋)", "input": "ＪＲ小樽駅", "expected": "jr小樽駅" },
+    { "why": "半角の英字も小文字にする (MAEHARA 20th)", "input": "MAEHARA 20th", "expected": "maehara20th" },
+    { "why": "半角カナは NFKC で全角になってからひらがなへ", "input": "ﾎｳﾘｭｳｼﾞ", "expected": "ほうりゅうじ" },
+    { "why": "カタカナをひらがなに寄せる (ふりがなは片方の表記しか持たない)", "input": "コンドウ", "expected": "こんどう" },
+    { "why": "小書き仮名も範囲に入る", "input": "ヴァイオリン", "expected": "ゔぁいおりん" },
+    { "why": "ヶ (U+30F6) が範囲の端", "input": "ヶ", "expected": "ゖ" },
+    { "why": "長音符は仮名ではないので動かさない", "input": "ホール", "expected": "ほーる" },
+    { "why": "対応するひらがなが無いヷ (U+30F7) は動かさない", "input": "ヷ", "expected": "ヷ" },
+    { "why": "中点を落とす (表記の揺れでしかない)", "input": "旧・本館", "expected": "旧本館" },
+    { "why": "半角の中点は NFKC で全角になってから落ちる", "input": "旧･本館", "expected": "旧本館" },
+    { "why": "全角空白を落とす", "input": "本館　付属屋", "expected": "本館付属屋" },
+    { "why": "半角空白と改行を落とす (項目の区切りが語に紛れない)", "input": "本館 付属屋\n離れ", "expected": "本館付属屋離れ" },
+    { "why": "全角数字を半角にする", "input": "第１号", "expected": "第1号" },
+    { "why": "全角の括弧を半角にする", "input": "（旧棟）", "expected": "(旧棟)" },
+    { "why": "丸数字は NFKC で数字になる", "input": "①", "expected": "1" },
+    { "why": "結合文字で書かれた濁点は合成済みと同じ形に落ちる", "input": "が", "expected": "が" },
+    { "why": "合成済みの濁点はそのまま", "input": "が", "expected": "が" },
+    { "why": "空文字はそのまま", "input": "", "expected": "" },
+    { "why": "空白だけなら空になる", "input": "　 ", "expected": "" }
+  ]
+}

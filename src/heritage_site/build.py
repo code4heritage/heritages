@@ -3,11 +3,16 @@
 やることは 3 つだけ。
 
 1. データリポジトリの `meta.json` を束ねた `index.json` を書く
-2. 地図が読む軽い索引 `points.json` を書く
+2. 一覧・検索・地図が読む行の索引 `records.json` を書く
 3. JSON Lines を**変換せずそのまま**並べ、静的ファイルを重ねる
 
 **JSON Lines に手を入れないのが要** (ADR 0015)。サイトが見せているのは
 データリポジトリのあの行そのもの、と言える状態を保つ。生成するのは索引だけ。
+
+行の索引は **1 本にする**。地図だけが読む索引 (`points.json`) を別に持つと、
+名称とキーを二重に運ぶことになる (実測 gzip 0.99 + 0.50 MB 対 まとめて 1.23 MB)。
+一覧は座標の有無を「地図に位置がない」の判定に使い、地図は同じ列を座標として
+読む — 同じ事実を 2 つのファイルに書き分ける理由が無い。
 """
 
 from __future__ import annotations
@@ -36,13 +41,15 @@ from .datasets import (
     discover,
     iter_rows,
 )
+from .facets import Axis, axis_keys, build_axes, positions
+from .search import SEARCH_FIELDS
 
 # 生成物のスキーマ版。フロントがこの版を見て、読めない索引で黙って壊れるのを防ぐ。
 SITE_SCHEMA_VERSION = 1
 
 DATASETS_DIRNAME = "datasets"
 INDEX_FILENAME = "index.json"
-POINTS_FILENAME = "points.json"
+RECORDS_FILENAME = "records.json"
 
 # 出力先を消してよいかの目印。`--out` の打ち間違いで別のディレクトリを消さない。
 MARKER_FILENAME = ".heritage-site-build"
@@ -86,7 +93,14 @@ def build(
     既に配信されているものを残す方が安全 (`checks` の方針)。
     """
     datasets = discover(data_dir)
-    rows = [row for index, dataset in enumerate(datasets) for row in iter_rows(dataset, index)]
+    # どの軸で絞り込めるかは `meta.json` が決める (ADR 0014)。行を読む前に
+    # 決まっていなければ、行から軸の値を拾えない。
+    keys = axis_keys(datasets)
+    rows = [
+        row
+        for index, dataset in enumerate(datasets)
+        for row in iter_rows(dataset, index, facet_keys=keys)
+    ]
 
     findings = run_checks(
         datasets,
@@ -99,9 +113,12 @@ def build(
     if report.failed or not write:
         return report
 
+    axes = build_axes(datasets, rows, keys)
     _prepare(out_dir)
     _write_json(out_dir / INDEX_FILENAME, _index_payload(datasets, report), indent=2)
-    _write_json(out_dir / POINTS_FILENAME, _points_payload(datasets, rows), indent=None)
+    _write_json(
+        out_dir / RECORDS_FILENAME, _records_payload(datasets, rows, keys, axes), indent=None
+    )
     _copy_site(site_dir, out_dir)
     _copy_data(datasets, out_dir)
     return report
@@ -163,27 +180,62 @@ def _index_payload(datasets: list[Dataset], report: BuildReport) -> dict[str, An
     }
 
 
-def _points_payload(datasets: list[Dataset], rows: list[Row]) -> dict[str, Any]:
-    """地図が読む索引。
+def _records_payload(
+    datasets: list[Dataset], rows: list[Row], keys: list[str], axes: list[Axis]
+) -> dict[str, Any]:
+    """一覧・検索・地図が読む行の索引。
 
-    2 万を超える点を配るので、行はオブジェクトではなく配列にする (キー名の
-    繰り返しがそのまま転送量になる)。並びは `fields` が持つ。
+    2 万を超える行を配るので、行はオブジェクトではなく配列にする (キー名の
+    繰り返しがそのまま転送量になる)。並びは `fields` が持ち、ファセットの値は
+    語彙の番号で書く。
+
+    **座標は地図に置けるものだけ入れる。**欠けている行と日本の外周から外れた行は
+    `null` にして、一覧が「地図に位置がない」と示せるようにする — 誤った座標を
+    渡して地図に置かせるより、位置が無いと言う方が正しい (`checks` が件数と実例を
+    報告に出す)。
     """
+    numbers = positions(axes)
+    axis_positions = [(axis, keys.index(axis.key)) for axis in axes]
     return {
         "schema_version": SITE_SCHEMA_VERSION,
         "datasets": [dataset.repo for dataset in datasets],
-        "fields": ["dataset", "ledger_id", "managed_id", "latitude", "longitude", "name"],
-        "points": [
+        "search_fields": list(SEARCH_FIELDS),
+        "axes": [
+            {"key": axis.key, "label": axis.label, "values": list(axis.values)} for axis in axes
+        ],
+        "fields": [
+            "dataset",
+            "ledger_id",
+            "managed_id",
+            "name",
+            "ridge_name",
+            "address",
+            "designated_year",
+            "url",
+            "latitude",
+            "longitude",
+            "search",
+            "facets",
+        ],
+        "records": [
             [
                 row.dataset_index,
                 row.ledger_id,
                 row.managed_id,
-                row.latitude,
-                row.longitude,
                 row.name,
+                row.ridge_name,
+                row.address,
+                row.designated_year,
+                row.url,
+                row.latitude if _mappable(row) else None,
+                row.longitude if _mappable(row) else None,
+                row.search,
+                [
+                    [numbers[axis.key][value] for value in row.facets[position]]
+                    for axis, position in axis_positions
+                ],
             ]
             for row in rows
-            if _mappable(row)
         ],
     }
 

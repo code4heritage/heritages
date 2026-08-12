@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +52,8 @@ def make_dataset(
     accessed_date: str = DEFAULT_ACCESSED_DATE,
     counts: dict[str, Any] | None = None,
     declared_files: list[dict[str, Any]] | None = None,
+    facets: dict[str, dict[str, int]] | None = None,
+    labels: dict[str, str] | None = None,
     write_meta: bool = True,
 ) -> Path:
     root = data_dir / repo
@@ -83,8 +87,9 @@ def make_dataset(
                 1 for row in rows if "latitude" in row and "longitude" in row
             ),
         },
-        "labels": {"name": "名称"},
-        "facets": {},
+        "labels": {"name": "名称", **(labels or {})},
+        # 絞り込みの軸はここから作る (ADR 0014)。既定は空 — 軸を試すテストだけが渡す。
+        "facets": facets or {},
         "files": declared_files
         if declared_files is not None
         else [
@@ -96,6 +101,22 @@ def make_dataset(
         json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
     return root
+
+
+@pytest.fixture(scope="session")
+def node() -> str:
+    """画面側 (JS) を確かめるための node。
+
+    **CI では飛ばさずに落とす。**黙って skip すると、「ビルドと画面で正規化が
+    一致する」「絞り込みの規則がこうなっている」という保証が CI から消える。
+    手元に node が無いぶんには先へ進めてよい。
+    """
+    found = shutil.which("node")
+    if found:
+        return found
+    if os.environ.get("CI"):
+        pytest.fail("node が見つからない (CI では JS 側の検証を飛ばさない)")
+    pytest.skip("node が無いので JS 側を確かめられない")
 
 
 @pytest.fixture

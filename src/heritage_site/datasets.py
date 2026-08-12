@@ -8,10 +8,12 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .search import search_text
 
 META_FILENAME = "meta.json"
 DATA_DIRNAME = "data"
@@ -68,6 +70,7 @@ class Row:
     """JSON Lines の 1 行のうち、索引と検査に要るぶんだけ。
 
     データそのものは変換せずに配るので (ADR 0015)、ここで全項目を持つ必要はない。
+    解説文のような重い項目を持たないのは、2 万を超える行を一度に抱えるため。
     """
 
     dataset_index: int
@@ -79,6 +82,14 @@ class Row:
     url: str
     latitude: float | None
     longitude: float | None
+    ridge_name: str
+    address: str
+    designated_year: str
+    western_year: str
+    search: str
+    # 軸ごとの値。**並びは `iter_rows` に渡した `facet_keys` と同じ** (軸の名前を
+    # 行ごとに繰り返さないため)。値を持たない軸は空の組になる。
+    facets: tuple[tuple[str, ...], ...] = ()
 
     @property
     def key(self) -> tuple[str, str]:
@@ -120,8 +131,14 @@ def data_files(dataset: Dataset) -> list[Path]:
     return sorted(directory.glob(f"*{DATA_SUFFIX}"), key=lambda path: path.name)
 
 
-def iter_rows(dataset: Dataset, dataset_index: int) -> Iterator[Row]:
-    """データセットの全行を、ファイル名順・行順に読む。"""
+def iter_rows(
+    dataset: Dataset, dataset_index: int, *, facet_keys: Sequence[str] = ()
+) -> Iterator[Row]:
+    """データセットの全行を、ファイル名順・行順に読む。
+
+    `facet_keys` に渡した軸の値だけを行から拾う。**どの軸があるかは
+    `meta.json` が決める**ので (`facets.axis_keys`)、ここでは名前を知らない。
+    """
     for path in data_files(dataset):
         relative = f"{DATA_DIRNAME}/{path.name}"
         with path.open(encoding="utf-8") as stream:
@@ -134,7 +151,7 @@ def iter_rows(dataset: Dataset, dataset_index: int) -> Iterator[Row]:
                     raise DataError(
                         f"JSON として読めない: {dataset.repo}/{relative}:{line_number} ({error})"
                     ) from error
-                yield _row(record, dataset_index, relative, line_number)
+                yield _row(record, dataset_index, relative, line_number, facet_keys)
 
 
 def location(datasets: list[Dataset], row: Row) -> str:
@@ -152,7 +169,13 @@ def _read_meta(path: Path) -> dict[str, Any]:
     return meta
 
 
-def _row(record: Any, dataset_index: int, relative: str, line_number: int) -> Row:
+def _row(
+    record: Any,
+    dataset_index: int,
+    relative: str,
+    line_number: int,
+    facet_keys: Sequence[str],
+) -> Row:
     if not isinstance(record, dict):
         raise DataError(f"行がオブジェクトでない: {relative}:{line_number}")
     latitude = _coordinate(record.get("latitude"))
@@ -170,7 +193,29 @@ def _row(record: Any, dataset_index: int, relative: str, line_number: int) -> Ro
         url=_text(record.get("url")),
         latitude=latitude,
         longitude=longitude,
+        ridge_name=_text(record.get("ridge_name")),
+        address=_text(record.get("address")),
+        # 日付は 4 / 7 / 10 文字の可変長 (原文にそこまでしか無いことがある)。
+        # 先頭 4 文字がどの長さでも年になる。
+        designated_year=_text(record.get("designated_date"))[:4],
+        western_year=_text(record.get("western_year")),
+        search=search_text(record),
+        facets=tuple(values_of(record, key) for key in facet_keys),
     )
+
+
+def values_of(record: Any, key: str) -> tuple[str, ...]:
+    """絞り込みの軸 1 つぶんの値。**単一の値も配列も来る**。
+
+    401 の種別は 2 つ持ちうる (特別名勝 + 特別史跡の複合指定)。空文字は値として
+    数えない — 選べない項目が語彙に混じる。
+    """
+    value = record.get(key) if isinstance(record, dict) else None
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if isinstance(value, list):
+        return tuple(item for item in value if isinstance(item, str) and item)
+    return ()
 
 
 def _text(value: Any) -> str:

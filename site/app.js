@@ -1,8 +1,15 @@
-// 索引を読んでデータセットの一覧を描く。
+// 索引を読んで画面を組み立てる。
 //
 // バンドラは使わない (ADR 0015 で決めた「生成物をコミットしない」に、素の ESM が
 // そのまま乗る)。データの取得はすべて相対パスにして、Pages のベースパスに
 // 依存させない。
+//
+// 読むものは 2 つ。データセットの索引 (index.json・16 KB) と行の索引
+// (records.json・約 1.3 MB)。**別々に読んで、先に届いた方から描く** — 件数と
+// 利用日の表は軽いので、一覧の読み込みを待たせない。
+
+import { createBrowser } from "./browse.js";
+import { createCatalog, fetchRecords } from "./records.js";
 
 const INDEX_URL = "./index.json";
 
@@ -15,11 +22,19 @@ const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 main();
 
 async function main() {
+  let index;
   try {
-    const index = await fetchIndex();
+    index = await fetchIndex();
     render(index);
   } catch (error) {
-    showError(error);
+    showError("error", error);
+    return;
+  }
+  try {
+    const payload = await fetchRecords();
+    startBrowsing(payload, datasetLabels(index));
+  } catch (error) {
+    showError("browse-error", error);
   }
 }
 
@@ -42,6 +57,29 @@ function render(index) {
   renderSummary(index);
   renderDatasets(index.datasets);
   renderAttribution(index.datasets);
+}
+
+// 種別の呼び名の正本は meta.json (ADR 0014)。行の索引はリポジトリ名しか
+// 持たないので、表示名はこちらから渡す。
+function datasetLabels(index) {
+  return Object.fromEntries(
+    index.datasets.map(({ repo, meta }) => [repo, meta.dataset?.name ?? repo]),
+  );
+}
+
+function startBrowsing(payload, labels) {
+  const catalog = createCatalog(payload, labels);
+  document.getElementById("browse-loading").hidden = true;
+  document.getElementById("browse").hidden = false;
+  createBrowser(catalog, {
+    search: document.getElementById("search"),
+    reset: document.getElementById("reset"),
+    facets: document.getElementById("facets"),
+    count: document.getElementById("result-count"),
+    list: document.getElementById("results"),
+    more: document.getElementById("more"),
+    empty: document.getElementById("no-results"),
+  });
 }
 
 function renderSummary({ totals, accessed_dates: accessed, datasets }) {
@@ -106,9 +144,10 @@ function cell(text, { scope, numeric } = {}) {
   return element;
 }
 
-function showError(error) {
-  document.getElementById("summary").textContent = "";
-  const element = document.getElementById("error");
+function showError(id, error) {
+  const element = document.getElementById(id);
   element.textContent = `データを表示できませんでした: ${error.message}`;
   element.hidden = false;
+  if (id === "error") document.getElementById("summary").textContent = "";
+  if (id === "browse-error") document.getElementById("browse-loading").hidden = true;
 }
