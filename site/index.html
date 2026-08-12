@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>国指定文化財等データ (非公式)</title>
+    <meta
+      name="description"
+      content="国指定文化財等データベース (文化庁) の建造物・記念物データを地図と一覧で見る非公式サイト"
+    />
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <h1>国指定文化財等データ</h1>
+      <p class="lead">
+        文化庁「国指定文化財等データベース」から取り出した建造物・記念物のデータを、
+        種別ごとのデータセットとして配っています。
+      </p>
+    </header>
+
+    <main id="main">
+      <section aria-labelledby="datasets-heading">
+        <h2 id="datasets-heading">データセット</h2>
+        <p id="summary" class="summary">読み込んでいます…</p>
+        <div class="table-wrap">
+          <table id="datasets">
+            <thead>
+              <tr>
+                <th scope="col">種別</th>
+                <th scope="col">分類</th>
+                <th scope="col" class="numeric">収録行数</th>
+                <th scope="col" class="numeric">座標あり</th>
+                <th scope="col">利用日</th>
+              </tr>
+            </thead>
+            <tbody id="datasets-body"></tbody>
+          </table>
+        </div>
+        <p id="error" class="error" hidden></p>
+        <noscript>
+          <p class="error">
+            このページはデータの読み込みに JavaScript を使います。データそのものは
+            JSON Lines として配っているので、ブラウザを使わずに読むこともできます。
+          </p>
+        </noscript>
+      </section>
+    </main>
+
+    <!--
+      出典・地図・非公式・ライセンスの 4 つは混ぜずに並べる (ADR 0007 / ADR 0016)。
+      「国が作成したかのような態様」を避けるための表示なので、まとめて 1 段落に
+      するとその役目を果たさない。地図の出典は地図が見えている画面にだけ出す。
+      ここが静かに消えていないことは tests/test_notices.py が検査する。
+    -->
+    <footer class="notices">
+      <section class="notice" data-notice="source">
+        <h2>データの出典</h2>
+        <div id="attribution"></div>
+      </section>
+
+      <section class="notice" data-notice="unofficial">
+        <h2>このサイトについて</h2>
+        <p>
+          有志が作成した<strong>非公式</strong>のサイトです。文化庁および国の機関が
+          作成・運営するものではありません。内容の正確性について国は関与していません。
+        </p>
+      </section>
+
+      <section class="notice" data-notice="license">
+        <h2>ライセンス</h2>
+        <p>
+          サイトのコードは MIT ライセンスで公開しています。掲載しているデータは
+          出典元である文化庁「国指定文化財等データベース」の利用規約に従います。
+        </p>
+      </section>
+    </footer>
+  </body>
+</html>

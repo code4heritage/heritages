@@ -1,0 +1,122 @@
+/* 素の CSS。ビルド工程を持たないので、変数と単純な規則だけで組む。 */
+
+:root {
+  color-scheme: light dark;
+  --bg: #fdfdfb;
+  --fg: #1b1b19;
+  --muted: #5d5d57;
+  --line: #d9d7cf;
+  --accent: #6b4f1d;
+  --error: #8a1c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --fg: #e9e8e4;
+    --muted: #a5a49e;
+    --line: #34363b;
+    --accent: #d8bd83;
+    --error: #f0a3a3;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+  max-width: 60rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  line-height: 1.7;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.6rem;
+}
+
+h2 {
+  font-size: 1.1rem;
+  margin: 2rem 0 0.5rem;
+}
+
+.lead,
+.summary {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
+.summary {
+  margin-bottom: 1rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+thead th {
+  border-bottom-width: 2px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.numeric {
+  text-align: right;
+}
+
+.error {
+  color: var(--error);
+}
+
+.notices {
+  margin-top: 3rem;
+  border-top: 2px solid var(--line);
+  padding-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* 出典・非公式・ライセンスは互いに独立した表示なので、視覚的にも区切る。 */
+.notice + .notice {
+  border-top: 1px solid var(--line);
+  padding-top: 0.75rem;
+}
+
+.notice h2 {
+  font-size: 0.9rem;
+  margin: 1rem 0 0.25rem;
+  color: var(--fg);
+}
+
+.notice p {
+  margin: 0.25rem 0;
+}
+
+/* 出典表記は改行を含む定型文。原文のまま出す。 */
+.attribution {
+  white-space: pre-line;
+}
+
+a {
+  color: var(--accent);
+}
