@@ -1,0 +1,141 @@
+"""テスト用のデータリポジトリを組み立てる道具。
+
+`meta.json` の件数は既定で行から数えて埋める。件数の不一致を試すテストは
+`counts` を明示して壊す — 「正しい状態を作るのが面倒だから検査が緩い」を避ける。
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+DEFAULT_ACCESSED_DATE = "2026-08-12"
+
+
+def record(
+    ledger_id: str,
+    managed_id: str,
+    *,
+    name: str = "名称",
+    url: str | None = None,
+    latitude: float | None = None,
+    longitude: float | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    """1 行ぶん。キーが無い = 値なしなので、指定しない項目はキーごと落とす。"""
+    row: dict[str, Any] = {
+        "ledger_id": ledger_id,
+        "managed_id": managed_id,
+        "name": name,
+        "url": url or f"https://kunishitei.bunka.go.jp/heritage/detail/{ledger_id}/{managed_id}",
+    }
+    if latitude is not None:
+        row["latitude"] = latitude
+    if longitude is not None:
+        row["longitude"] = longitude
+    row.update(extra)
+    return row
+
+
+def make_dataset(
+    data_dir: Path,
+    repo: str,
+    files: dict[str, list[dict[str, Any]]],
+    *,
+    name: str | None = None,
+    schema_version: int = 1,
+    accessed_date: str = DEFAULT_ACCESSED_DATE,
+    counts: dict[str, Any] | None = None,
+    declared_files: list[dict[str, Any]] | None = None,
+    write_meta: bool = True,
+) -> Path:
+    root = data_dir / repo
+    (root / "data").mkdir(parents=True, exist_ok=True)
+    rows = [row for rows in files.values() for row in rows]
+    for filename, contents in files.items():
+        lines = "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in contents)
+        (root / "data" / filename).write_text(lines, encoding="utf-8")
+
+    if not write_meta:
+        return root
+
+    meta = {
+        "schema_version": schema_version,
+        "dataset": {
+            "repo": repo,
+            "name": name or repo,
+            "category": {"code": "999", "name": "分類"},
+        },
+        "source": {
+            "name": "国指定文化財等データベース",
+            "publisher": "文化庁",
+            "accessed_date": accessed_date,
+            "attribution": "出典：「国指定文化財等データベース」（文化庁）を加工して作成",
+        },
+        "counts": counts
+        or {
+            "records": len(rows),
+            "files": len(files),
+            "with_coordinates": sum(
+                1 for row in rows if "latitude" in row and "longitude" in row
+            ),
+        },
+        "labels": {"name": "名称"},
+        "facets": {},
+        "files": declared_files
+        if declared_files is not None
+        else [
+            {"path": f"data/{filename}", "records": len(contents)}
+            for filename, contents in sorted(files.items())
+        ],
+    }
+    (root / "meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return root
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path) -> Path:
+    """検査を素通りする 2 データセット。壊す試験はここから 1 箇所だけ変える。"""
+    directory = tmp_path / "data-repos"
+    directory.mkdir()
+    make_dataset(
+        directory,
+        "national-treasures",
+        {
+            "13_tokyo.jsonl": [
+                record("102", "00004367", name="旧東宮御所", latitude=35.68, longitude=139.72),
+            ],
+            "26_kyoto.jsonl": [
+                record("102", "00001234", name="金堂", latitude=35.01, longitude=135.76),
+                record("102", "00001235", name="塔"),
+            ],
+        },
+        name="国宝（建造物）",
+    )
+    make_dataset(
+        directory,
+        "special-historic-sites",
+        {
+            "13_tokyo.jsonl": [
+                # 複合指定: 下の名勝と同じ棟。原本 URL も同じでなければならない。
+                record("401", "00009999", name="旧浜離宮庭園", latitude=35.65, longitude=139.76),
+            ],
+        },
+        name="特別史跡",
+    )
+    make_dataset(
+        directory,
+        "special-places-of-scenic-beauty",
+        {
+            "13_tokyo.jsonl": [
+                record("401", "00009999", name="旧浜離宮庭園", latitude=35.65, longitude=139.76),
+            ],
+        },
+        name="特別名勝",
+    )
+    return directory
