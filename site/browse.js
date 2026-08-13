@@ -26,6 +26,19 @@ export function visibleLimit(axis, expanded) {
   return expanded || axis.order === UNTRUNCATED_ORDER ? Infinity : VISIBLE_VALUES;
 }
 
+// 体系ごとの見出しでまとめる軸か (Issue #8)。
+//
+// 指定基準も種別も、**体系ごとに別の語彙が 1 本の軸に混ざっている** — 登録有形の
+// 登録基準と天然記念物の指定基準が、番号の振り方すら違うまま 63 値並ぶ。どの値が
+// どの体系かは索引の `groups` が持っていて (ビルドが行から測る)、**横断の軸では空**。
+//
+// ただし**最初から全部見える軸はそのまま**にする。3 値の「指定 / 登録 / 選定」も
+// 体系に張り付いてはいるが、見出しを 3 つ足しても読む量が増えるだけで、値は
+// はじめから全部見えている。
+export function showsGroups(axis) {
+  return (axis.groups?.length ?? 0) > 1 && axis.values.length > VISIBLE_VALUES;
+}
+
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
 // `onResults` は絞り込みの結果 (行番号の配列) を受け取る。地図はこれを見て
@@ -98,12 +111,13 @@ function renderSummary(element, matched, shown, total) {
 }
 
 function renderFacets(catalog, container, handlers) {
-  const groups = catalog.axes.map((axis, position) => {
+  const groups = catalog.axes.map((axis) => {
     const group = document.createElement("details");
     group.className = "facet";
-    // 最初の軸 (データセット) だけ開いておく。9 軸すべてを開くと、一覧に
-    // たどり着く前に画面が facet で埋まる。
-    group.open = position === 0;
+    // **体系ごとにまとめる軸は畳んでおく** (Issue #8)。指定基準の 63 値は
+    // 体系が混ざったままでは読み解けないので、開いていても選べない。逆に
+    // 横断の軸は開いておく — 所在都道府県はどの種別を見ていても同じ意味で効く。
+    group.open = !showsGroups(axis);
 
     const summary = document.createElement("summary");
     const label = document.createElement("span");
@@ -120,6 +134,10 @@ function renderFacets(catalog, container, handlers) {
     more.className = "facet-more";
     more.addEventListener("click", () => handlers.onExpand(axis.key));
 
+    const sections = renderGroups(axis, list);
+    // 値の番号から体系の番号を引く。まとめない軸では空のまま (値は list へ直接)。
+    const sectionOf = sections.flatMap(({ size }, number) => Array(size).fill(number));
+
     const items = axis.values.map((value, number) => {
       const item = document.createElement("label");
       item.className = "facet-value";
@@ -134,22 +152,23 @@ function renderFacets(catalog, container, handlers) {
       const count = document.createElement("span");
       count.className = "facet-count";
       item.append(input, text, count);
-      list.append(item);
-      return { item, input, count };
+      (sections[sectionOf[number]]?.element ?? list).append(item);
+      return { item, input, count, section: sectionOf[number] ?? -1 };
     });
 
     group.append(summary, list, more);
     container.append(group);
-    return { axis, group, chosen, items, more };
+    return { axis, group, chosen, items, sections, more };
   });
 
   return {
     update(counts, selection, expanded) {
-      groups.forEach(({ axis, group, chosen, items, more }, position) => {
+      groups.forEach(({ axis, group, chosen, items, sections, more }, position) => {
         const limit = visibleLimit(axis, expanded.has(axis.key));
+        const shown = sections.map(() => 0);
         let visible = 0;
         let hidden = 0;
-        items.forEach(({ item, input, count }, number) => {
+        items.forEach(({ item, input, count, section }, number) => {
           const found = counts[position][number];
           input.checked = selection[axis.key].has(number);
           count.textContent = NUMBER_FORMAT.format(found);
@@ -157,8 +176,18 @@ function renderFacets(catalog, container, handlers) {
           const usable = found > 0 || input.checked;
           const room = visible < limit;
           item.hidden = !usable || !room;
-          if (usable && room) visible += 1;
-          else if (usable) hidden += 1;
+          if (usable && room) {
+            visible += 1;
+            if (section >= 0) shown[section] += 1;
+          } else if (usable) hidden += 1;
+        });
+        // **見えている体系が 1 つになったら見出しを出さない。**データセットを
+        // 選べば 0 件の値が消えて体系は自然に 1 つになり、そこで残る見出しは
+        // 選んだ種別の名前をなぞるだけになる。
+        const alone = shown.filter((found) => found > 0).length < 2;
+        sections.forEach(({ element, heading }, number) => {
+          element.hidden = shown[number] === 0;
+          heading.hidden = alone;
         });
         const picked = selection[axis.key].size;
         chosen.textContent = picked > 0 ? `${picked} 件選択中` : "";
@@ -168,6 +197,26 @@ function renderFacets(catalog, container, handlers) {
       });
     },
   };
+}
+
+// 体系ごとの区画。**見出しは索引が持っている値** (ビルドが行から測る) で、
+// 体系の表を画面に持たない (ADR 0014 / ADR 0015)。
+function renderGroups(axis, list) {
+  if (!showsGroups(axis)) return [];
+  return axis.groups.map((scheme, number) => {
+    const element = document.createElement("div");
+    element.className = "facet-group";
+    // 見出しと値の結び付きを、見た目だけでなく読み上げにも残す。
+    element.setAttribute("role", "group");
+    const heading = document.createElement("p");
+    heading.className = "facet-group-label";
+    heading.id = `facet-${axis.key}-group-${number}`;
+    heading.textContent = scheme.label;
+    element.setAttribute("aria-labelledby", heading.id);
+    element.append(heading);
+    list.append(element);
+    return { element, heading, size: scheme.size };
+  });
 }
 
 function renderList(list, catalog, indexes) {

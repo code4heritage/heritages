@@ -32,8 +32,11 @@ def _dataset(
     *,
     facets: dict[str, dict[str, int]],
     labels: dict[str, str] | None = None,
+    name: str | None = None,
 ) -> None:
-    make_dataset(data_dir, repo, {"13_tokyo.jsonl": rows}, facets=facets, labels=labels)
+    make_dataset(
+        data_dir, repo, {"13_tokyo.jsonl": rows}, facets=facets, labels=labels, name=name
+    )
 
 
 def test_the_axes_come_from_the_metadata(tmp_path: Path) -> None:
@@ -304,6 +307,211 @@ def test_two_areas_in_one_file_is_not_an_area_axis(tmp_path: Path) -> None:
         },
     )
     assert axes[0].order == "count"
+
+
+def test_an_axis_whose_values_stick_to_one_dataset_is_grouped(tmp_path: Path) -> None:
+    """指定基準は体系ごとに別の語彙が 1 本の軸に混ざっている (Issue #8)。
+
+    どの値がどの体系かは**行から導ける**ので、体系の表をサイトに持たずに済む
+    (ADR 0014 / ADR 0015)。種別が増えても判定は追随する。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    _dataset(
+        data_dir,
+        "a",
+        [record("401", f"a{n}", criteria="一．貝塚、集落跡") for n in range(3)]
+        + [record("401", f"a1{n}", criteria="二．都城跡") for n in range(2)],
+        facets={"criteria": {"一．貝塚、集落跡": 3, "二．都城跡": 2}},
+        name="史跡",
+    )
+    _dataset(
+        data_dir,
+        "b",
+        [record("401", "b1", criteria="（一）名木、巨樹")],
+        facets={"criteria": {"（一）名木、巨樹": 1}},
+        name="天然記念物",
+    )
+    _dataset(
+        data_dir,
+        "c",
+        [record("401", "c1", criteria="一．公園、庭園")],
+        facets={"criteria": {"一．公園、庭園": 1}},
+        name="名勝",
+    )
+    [axis] = _axes(data_dir)
+    assert [(group.label, group.size) for group in axis.groups] == [
+        ("史跡", 2),
+        ("名勝", 1),
+        ("天然記念物", 1),
+    ]
+    # 値は体系ごとにまとまる。まとまりが持つのは区間の長さだけで、並びは
+    # `values` が正本 (同じ文字列を索引に二度書かない)。
+    assert axis.values == ("一．貝塚、集落跡", "二．都城跡", "一．公園、庭園", "（一）名木、巨樹")
+
+
+def test_a_scheme_is_named_after_where_its_values_show_up_most(tmp_path: Path) -> None:
+    """体系の名前は**その値がいちばん多く現れたデータセット** (Issue #8)。
+
+    出どころを並べた名前にすると、特別天然記念物にも出る基準と天然記念物に
+    しか出ない基準が別の見出しに割れる (実データでは指定基準が 8 でなく 12 の
+    見出しになり、「史跡」を選んだ読み手に「史跡 / 特別史跡」と
+    「史跡 / 名勝 / 特別史跡」が並ぶ)。読み手が要るのは**どの体系の基準か**で、
+    その基準が他にどこで使われているかではない。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    _dataset(
+        data_dir,
+        "a",
+        [record("401", f"a{n}", criteria="（一）名木、巨樹") for n in range(3)]
+        + [record("401", "a9", criteria="（二）洞穴")],
+        facets={"criteria": {"（一）名木、巨樹": 3, "（二）洞穴": 1}},
+        name="天然記念物",
+    )
+    _dataset(
+        data_dir,
+        "b",
+        [record("401", "b1", criteria="（一）名木、巨樹")],
+        facets={"criteria": {"（一）名木、巨樹": 1}},
+        name="特別天然記念物",
+    )
+    _dataset(
+        data_dir,
+        "c",
+        [record("401", "c1", criteria="一．貝塚、集落跡")],
+        facets={"criteria": {"一．貝塚、集落跡": 1}},
+        name="史跡",
+    )
+    [axis] = _axes(data_dir)
+    # 「名木」は特別天然記念物にも出るが、いちばん多いのは天然記念物。
+    # そこにしか出ない「洞穴」と同じ見出しにまとまる。
+    assert [(group.label, group.size) for group in axis.groups] == [
+        ("天然記念物", 2),
+        ("史跡", 1),
+    ]
+
+
+def test_an_axis_that_works_across_the_datasets_is_not_grouped(tmp_path: Path) -> None:
+    """所在都道府県は 47 値すべてがどの種別にも出る (Issue #8)。
+
+    まとめても見出しに書けるのは「ほぼ全部」だけなので、体系の見出しを付けない。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    for repo in ("a", "b", "c"):
+        _dataset(
+            data_dir,
+            repo,
+            [
+                record("101", f"{repo}1", prefecture="東京都"),
+                record("101", f"{repo}2", prefecture="京都府"),
+            ],
+            facets={"prefecture": {"東京都": 1, "京都府": 1}},
+        )
+    [axis] = _axes(data_dir)
+    assert axis.groups == ()
+
+
+def test_a_composite_designation_does_not_blur_the_schemes(tmp_path: Path) -> None:
+    """複合指定は**同じ行が両方のリポジトリに書かれる** (ADR 0012)。
+
+    数に入れると名勝の基準が史跡にも出ていることになり、値が体系をまたいで
+    見える (Issue #8 のコメントの実測)。ここでは 3 つのうち 2 つの値が
+    2 データセットに出ることになり、**横断の軸と見なされて見出しごと消える**。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    composite = record("401", "9", criteria=["一．公園、庭園", "一．貝塚、集落跡"])
+    _dataset(
+        data_dir,
+        "a",
+        [record("401", "1", criteria="一．貝塚、集落跡"), composite],
+        facets={"criteria": {"一．貝塚、集落跡": 2, "一．公園、庭園": 1}},
+        name="史跡",
+    )
+    _dataset(
+        data_dir,
+        "b",
+        [record("401", "2", criteria="一．公園、庭園"), composite],
+        facets={"criteria": {"一．公園、庭園": 2, "一．貝塚、集落跡": 1}},
+        name="名勝",
+    )
+    _dataset(
+        data_dir,
+        "c",
+        [record("401", "3", criteria="（一）名木、巨樹")],
+        facets={"criteria": {"（一）名木、巨樹": 1}},
+        name="天然記念物",
+    )
+    [axis] = _axes(data_dir)
+    # 体系の並びは値の並び次第なので、ここでは 3 つに割れていることだけ見る。
+    assert sorted(group.label for group in axis.groups) == ["史跡", "名勝", "天然記念物"]
+
+
+def test_an_axis_that_only_one_dataset_uses_is_not_grouped(tmp_path: Path) -> None:
+    """1 つのデータセットにしか値が無い軸に、体系の見出しは要らない。
+
+    国宝・重文区分のように、軸そのものが特定の種別に属することがある。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    _dataset(
+        data_dir,
+        "a",
+        [record("101", "1", types="住宅"), record("101", "2", types="倉庫")],
+        facets={"types": {"住宅": 1, "倉庫": 1}},
+        name="登録有形文化財（建造物）",
+    )
+    _dataset(
+        data_dir,
+        "b",
+        [record("101", "3", prefecture="東京都")],
+        facets={"prefecture": {"東京都": 1}},
+    )
+    axes = {axis.key: axis for axis in _axes(data_dir)}
+    assert axes["types"].groups == ()
+
+
+def test_grouping_keeps_the_order_inside_each_scheme(tmp_path: Path) -> None:
+    """まとめ直しても、体系の中の並び (件数順・年代順) は動かさない。
+
+    体系の並びは「その体系の最初の値がどこにいたか」で決まる。件数の多い値を
+    持つ体系ほど先に来て、体系の中は件数順のまま残る。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    _dataset(
+        data_dir,
+        "a",
+        [record("401", f"a{n}", criteria="一．貝塚、集落跡") for n in range(3)]
+        + [record("401", "a9", criteria="二．都城跡")],
+        facets={"criteria": {"一．貝塚、集落跡": 3, "二．都城跡": 1}},
+        name="史跡",
+    )
+    _dataset(
+        data_dir,
+        "b",
+        [record("401", f"b{n}", criteria="（一）名木、巨樹") for n in range(2)],
+        facets={"criteria": {"（一）名木、巨樹": 2}},
+        name="天然記念物",
+    )
+    _dataset(
+        data_dir,
+        "c",
+        [record("401", "c1", criteria="一．公園、庭園")],
+        facets={"criteria": {"一．公園、庭園": 1}},
+        name="名勝",
+    )
+    [axis] = _axes(data_dir)
+    # 件数順だけなら 貝塚(3) → 名木(2) → 公園(1) → 都城(1)。体系でまとめ直しても
+    # 史跡の 2 値は件数順のまま並び、体系の並びは先頭の値の順で決まる。
+    assert axis.values == ("一．貝塚、集落跡", "二．都城跡", "（一）名木、巨樹", "一．公園、庭園")
+    assert [(group.label, group.size) for group in axis.groups] == [
+        ("史跡", 2),
+        ("天然記念物", 1),
+        ("名勝", 1),
+    ]
 
 
 def test_the_period_axis_keeps_its_own_order(tmp_path: Path) -> None:

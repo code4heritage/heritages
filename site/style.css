@@ -301,6 +301,15 @@ button:hover {
   margin: 0.4rem 0 0.2rem;
 }
 
+/* 体系ごとのまとまり (Issue #8)。見出しは選べるものではないので、値より
+   弱く見せる。余白を見出し側に持たせてあるので、見出しを隠せば区画の
+   切れ目ごと消える (体系が 1 つに絞られたとき)。 */
+.facet-group-label {
+  margin: 0.5rem 0 0.1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .facet-value {
   display: flex;
   align-items: baseline;

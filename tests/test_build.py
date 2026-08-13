@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -10,7 +11,7 @@ from typing import Any
 import pytest
 
 from conftest import make_dataset, record
-from heritage_site.build import build
+from heritage_site.build import SITE_SCHEMA_VERSION, build
 from heritage_site.datasets import DataError
 
 TODAY = date(2026, 8, 13)
@@ -189,6 +190,23 @@ def test_the_index_takes_the_year_from_a_date_of_any_length(data_dir: Path, tmp_
     assert payload["by_key"]["00004444"]["designated_year"] == "1922"
     # キーが無い = 値なし。日付を持たない行は年も持たない。
     assert payload["by_key"]["00001235"]["designated_year"] == ""
+
+
+def test_the_screen_expects_the_schema_version_the_build_writes() -> None:
+    """索引の版を上げたら**画面側の 2 か所も**上げる。
+
+    `index.json` を読む `app.js` と `records.json` を読む `records.js` が、
+    同じ `SITE_SCHEMA_VERSION` を見ている。片方だけ古いと、画面はその索引を
+    「対応していない」と言って丸ごと出なくなる — 索引の形を足した回に気付けない。
+    """
+    for name in ("app.js", "records.js"):
+        found = re.search(
+            r"^const SUPPORTED_SCHEMA_VERSION = (\d+);",
+            (SITE_DIR / name).read_text(encoding="utf-8"),
+            re.MULTILINE,
+        )
+        assert found, f"{name} が対応版を宣言していない"
+        assert int(found.group(1)) == SITE_SCHEMA_VERSION, name
 
 
 def test_build_is_deterministic(data_dir: Path, tmp_path: Path) -> None:

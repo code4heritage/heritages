@@ -46,8 +46,10 @@ from .search import SEARCH_FIELDS
 
 # 生成物のスキーマ版。フロントがこの版を見て、読めない索引で黙って壊れるのを防ぐ。
 # 2 で行の出どころ (`files` / `file` / `line`) が入った — 詳細ビューが JSON Lines を
-# その場で読むための道しるべ (Issue #32 §4)。
-SITE_SCHEMA_VERSION = 2
+# その場で読むための道しるべ (Issue #32 §4)。3 で軸に体系のまとまり (`groups`) が
+# 入った — 体系ごとに別の語彙が 1 本の軸に混ざる軸を、画面が畳んでまとめるため
+# (Issue #8)。
+SITE_SCHEMA_VERSION = 3
 
 DATASETS_DIRNAME = "datasets"
 INDEX_FILENAME = "index.json"
@@ -221,11 +223,16 @@ def _records_payload(
         "search_fields": list(SEARCH_FIELDS),
         "axes": [
             # `order` は並びの根拠。画面はこれを見て畳み方を決める (Issue #7)。
+            # `groups` は体系のまとまりで、**横断の軸では空** (Issue #8)。値の
+            # 並びの先頭から `size` ずつ区切る — 値をもう一度書かない。
             {
                 "key": axis.key,
                 "label": axis.label,
                 "order": axis.order,
                 "values": list(axis.values),
+                "groups": [
+                    {"label": group.label, "size": group.size} for group in axis.groups
+                ],
             }
             for axis in axes
         ],

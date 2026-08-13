@@ -41,6 +41,18 @@ _AREA_CODE = re.compile(r"(\d+)_")
 
 
 @dataclass(frozen=True)
+class Group:
+    """軸の中の体系 1 つ (Issue #8)。`values` の先頭から数えた連続する区間を指す。
+
+    値そのものを持たないのは、同じ文字列を索引に二度書かないため。並びは
+    `Axis.values` が正本で、こちらは切れ目だけを持つ。
+    """
+
+    label: str
+    size: int
+
+
+@dataclass(frozen=True)
 class Axis:
     """絞り込みの軸 1 つ。`values` の並びがそのまま画面の並びになる。"""
 
@@ -48,6 +60,9 @@ class Axis:
     label: str
     values: tuple[str, ...]
     order: str = ORDER_COUNT
+    # 体系ごとのまとまり (Issue #8)。**横断の軸では空**。値が体系ごとに
+    # 張り付いている軸だけがこれを持ち、画面は見出しと畳み方をここから決める。
+    groups: tuple[Group, ...] = ()
 
 
 def axis_keys(datasets: list[Dataset]) -> list[str]:
@@ -87,15 +102,91 @@ def build_axes(datasets: list[Dataset], rows: list[Row], keys: list[str]) -> lis
             counts[position].update(values)
     medians = _period_medians(rows, keys)
     codes = _area_codes(rows, keys)
-    return [
-        Axis(
-            key=key,
-            label=_label(datasets, key),
-            values=_order(key, counts[position], medians, codes if key == AREA_KEY else {}),
-            order=_order_kind(key, codes),
+    composite = _composite_keys(rows)
+    axes = []
+    for position, key in enumerate(keys):
+        if not counts[position]:
+            continue
+        values = _order(key, counts[position], medians, codes if key == AREA_KEY else {})
+        schemes = _schemes(datasets, rows, position, values, composite)
+        axes.append(
+            Axis(
+                key=key,
+                label=_label(datasets, key),
+                values=tuple(value for _, members in schemes for value in members) or values,
+                order=_order_kind(key, codes),
+                groups=tuple(Group(label, len(members)) for label, members in schemes),
+            )
         )
-        for position, key in enumerate(keys)
-        if counts[position]
+    return axes
+
+
+def _composite_keys(rows: list[Row]) -> set[tuple[str, str]]:
+    """複数のデータセットに現れる指定 (401 の複合指定。ADR 0012)。
+
+    体系を数えるときにこの行を外す。**同じ行が両方のリポジトリに書かれる**ので、
+    数に入れると名勝の指定基準が史跡にも出ていることになり、どの値も体系を
+    またいで見える (Issue #8 のコメントの実測)。
+    """
+    owners: defaultdict[tuple[str, str], set[int]] = defaultdict(set)
+    for row in rows:
+        owners[row.key].add(row.dataset_index)
+    return {key for key, found in owners.items() if len(found) > 1}
+
+
+def _schemes(
+    datasets: list[Dataset],
+    rows: list[Row],
+    position: int,
+    values: tuple[str, ...],
+    composite: set[tuple[str, str]],
+) -> list[tuple[str, tuple[str, ...]]]:
+    """軸の値を体系ごとにまとめる。**横断の軸では何も返さない** (Issue #8)。
+
+    指定基準も種別も、体系ごとに別の語彙が 1 本の軸に混ざっている — 登録有形の
+    登録基準と天然記念物の指定基準が、番号の振り方すら違うまま並ぶ。**どの値が
+    どの体系かは行から導ける**ので、体系の表をサイトに持たずに済む
+    (ADR 0014 / ADR 0015)。種別が増えても判定は追随する。
+
+    横断かどうかも行から測る。**値がその軸を持つデータセットの過半に現れるなら
+    横断**で、まとめる意味がない — 所在都道府県は 47 値すべてが 8 データセットに
+    出るので、体系の見出しを付けても「ほぼ全部」としか書けない。逆に指定基準は
+    値あたり 2 データセットで、体系がそのまま境目になる。
+
+    体系の名前は**その値がいちばん多く現れたデータセット**にする。出どころの
+    データセットを並べた名前にはしない — 特別史跡にも出る史跡の基準と史跡に
+    しか出ない基準が別の見出しに割れ、「史跡」を選んだ読み手に「史跡 / 特別史跡」と
+    「史跡 / 名勝 / 特別史跡」が並ぶ。読み手が要るのは**どの体系の基準か**であって、
+    その基準が他にどこで使われているかではない。
+    """
+    origins: dict[str, Counter[int]] = {}
+    fallback: dict[str, Counter[int]] = {}
+    for row in rows:
+        for value in row.facets[position]:
+            fallback.setdefault(value, Counter())[row.dataset_index] += 1
+            if row.key not in composite:
+                origins.setdefault(value, Counter())[row.dataset_index] += 1
+    # 複合指定にしか出ない値は、汚れていてもそれしか手掛かりが無い。
+    found = {
+        value: origins.get(value) or fallback.get(value) or Counter[int]() for value in values
+    }
+    present = set().union(*(set(tally) for tally in found.values())) if found else set()
+    if not present:
+        return []
+    sizes = sorted(len(tally) for tally in found.values())
+    if statistics.median(sizes) * 2 >= len(present):
+        return []
+
+    # 体系が 1 つしか無い軸はここへ来ない — 全値が同じデータセットに出るなら、
+    # それは過半どころか全部で、上の横断の判定が先に落としている。
+    grouped: dict[int, list[str]] = {}
+    for value in values:
+        tally = found[value]
+        # 同数ならデータセットの並び順で決める (生成物を実行ごとに揺らさない)。
+        origin = min(tally, key=lambda index: (-tally[index], index))
+        grouped.setdefault(origin, []).append(value)
+    return [
+        (datasets[origin].name, tuple(found_values)) for origin, found_values in grouped.items()
     ]
 
 

@@ -15,7 +15,7 @@ const INDEX_URL = "./index.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
 // 食い違ったまま描くと画面のどこかが黙って空になるので、先に止める。
-const SUPPORTED_SCHEMA_VERSION = 2;
+const SUPPORTED_SCHEMA_VERSION = 3;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
