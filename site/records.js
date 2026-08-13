@@ -14,7 +14,7 @@ import { normalize } from "./normalize.js";
 const RECORDS_URL = "./records.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
-const SUPPORTED_SCHEMA_VERSION = 2;
+const SUPPORTED_SCHEMA_VERSION = 3;
 
 // データセット (種別) は絞り込みの主軸だが、meta.json の facets には出てこない。
 // 種別横断のサイトなので、ここだけは索引の datasets から軸を作る。
@@ -56,6 +56,8 @@ export function createCatalog(payload, datasets = [], { source = createRecordSou
     {
       key: DATASET_AXIS_KEY,
       label: DATASET_AXIS_LABEL,
+      // データセットそのものが体系なので、まとめる先はない (Issue #8)。
+      groups: [],
       values: payload.datasets.map((repo) => info.get(repo)?.name ?? repo),
       // データセットは 1 行に 1 つ。列の値がそのまま語彙の番号になっている。
       valuesOf: (record) => [record[column.dataset]],
@@ -65,6 +67,9 @@ export function createCatalog(payload, datasets = [], { source = createRecordSou
       label: axis.label,
       // 並びの根拠 (count / period / area)。畳み方の判断に画面が使う。
       order: axis.order,
+      // 体系ごとのまとまり (Issue #8)。**横断の軸では空**。値の並びの先頭から
+      // `size` ずつ区切る。
+      groups: axis.groups ?? [],
       values: axis.values,
       // 軸によっては 1 行が複数の値を持つ (401 の複合指定など)。
       valuesOf: (record) => record[column.facets][position],

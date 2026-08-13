@@ -20,14 +20,29 @@ RECORDS_JS = Path(__file__).resolve().parents[1] / "site/records.js"
 # 3 データセット・2 軸の小さな索引。ビルドが書く形と同じ (build.py の
 # `_records_payload`)。
 PAYLOAD: dict[str, Any] = {
-    "schema_version": 2,
+    "schema_version": 3,
     "datasets": ["national-treasures", "historic-sites", "places-of-scenic-beauty"],
     # データセットごとの JSON Lines。行は番号でここを指す (build.py の `files`)。
     "files": [["data/26_kyoto.jsonl"], ["data/13_tokyo.jsonl"], ["data/13_tokyo.jsonl"]],
     "search_fields": ["name", "ridge_name", "name_kana", "ridge_name_kana", "address"],
     "axes": [
-        {"key": "prefecture", "label": "所在都道府県", "values": ["京都府", "奈良県", "東京都"]},
-        {"key": "types", "label": "種別", "values": ["寺院", "神社", "庭園"]},
+        # 横断の軸は体系のまとまりを持たない (Issue #8)。
+        {
+            "key": "prefecture",
+            "label": "所在都道府県",
+            "values": ["京都府", "奈良県", "東京都"],
+            "groups": [],
+        },
+        # 種別は体系ごとに語彙が張り付く。値の並びの先頭から `size` ずつ区切る。
+        {
+            "key": "types",
+            "label": "種別",
+            "values": ["寺院", "神社", "庭園"],
+            "groups": [
+                {"label": "国宝（建造物）", "size": 2},
+                {"label": "史跡 / 名勝", "size": 1},
+            ],
+        },
     ],
     "fields": [
         "dataset",
@@ -127,7 +142,12 @@ const answers = queries.map(({{ query, selection }}) => {{
     mappable: matched.map((index) => catalog.record(index).mappable),
     siblings: matched.map((index) => catalog.record(index).siblings),
     counts: Object.fromEntries(catalog.axes.map((axis, position) => [axis.key, counts[position]])),
-    axes: catalog.axes.map((axis) => ({{ key: axis.key, label: axis.label, values: axis.values }})),
+    axes: catalog.axes.map((axis) => ({{
+      key: axis.key,
+      label: axis.label,
+      values: axis.values,
+      groups: axis.groups,
+    }})),
   }};
 }});
 process.stdout.write(JSON.stringify(answers));
@@ -327,3 +347,65 @@ def test_expanding_an_axis_still_shows_everything(node: str) -> None:
     """「ほか N 件を表示」を押したあとの振る舞いは変えない。"""
     [limit] = _limits(node, [{"axis": {"key": "period", "order": "period"}, "expanded": True}])
     assert limit is None
+
+
+def test_the_schemes_reach_the_screen(node: str) -> None:
+    """体系のまとまりは索引が持つ (ビルドが行から測る)。画面はそれを見て畳む。"""
+    [answer] = _ask(node, [{}])
+    axes = {axis["key"]: axis for axis in answer["axes"]}
+    assert axes["types"]["groups"] == [
+        {"label": "国宝（建造物）", "size": 2},
+        {"label": "史跡 / 名勝", "size": 1},
+    ]
+    assert axes["prefecture"]["groups"] == []
+    # データセットそのものが体系なので、まとめる先はない。
+    assert axes["dataset"]["groups"] == []
+
+
+_GROUPS_HARNESS = """
+import {{ showsGroups }} from {module};
+let input = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) input += chunk;
+process.stdout.write(JSON.stringify(JSON.parse(input).map(showsGroups)));
+"""
+
+
+def _grouped(node: str, axes: list[dict[str, Any]]) -> list[bool]:
+    script = _GROUPS_HARNESS.format(
+        module=json.dumps((RECORDS_JS.parent / "browse.js").as_posix())
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        input=json.dumps(axes),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return list(json.loads(completed.stdout))
+
+
+def _axis(groups: int, values: int) -> dict[str, Any]:
+    return {
+        "groups": [{"label": f"体系{number}", "size": 1} for number in range(groups)],
+        "values": [f"値{number}" for number in range(values)],
+    }
+
+
+def test_an_axis_with_many_values_from_several_schemes_is_grouped(node: str) -> None:
+    """指定基準は 63 値が 12 の体系に混ざっている。まとめないと最初の画面が読めない。"""
+    assert _grouped(node, [_axis(groups=12, values=63)]) == [True]
+
+
+def test_a_cross_cutting_axis_is_not_grouped(node: str) -> None:
+    """所在都道府県は 47 値あるが横断なので、索引にまとまりが入っていない。"""
+    assert _grouped(node, [_axis(groups=0, values=47)]) == [False]
+
+
+def test_a_short_axis_is_left_alone(node: str) -> None:
+    """3 値の「指定 / 登録 / 選定」は体系に張り付いているが、はじめから全部見える。
+
+    見出しを 3 つ足しても読む量が増えるだけなので、畳まずまとめず素通しする。
+    """
+    assert _grouped(node, [_axis(groups=3, values=3)]) == [False]
