@@ -357,6 +357,101 @@ button:hover {
   color: var(--muted);
 }
 
+/* 開くと、その行が持っている項目をすべて出す (Issue #32 §4)。閉じている間は
+   一覧の 1 行を押しのけない大きさに留める。 */
+.record-detail {
+  font-size: 0.9rem;
+}
+
+.record-detail > summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.detail-body {
+  margin: 0.4rem 0 0.2rem;
+  border-left: 2px solid var(--line);
+  padding-left: 0.75rem;
+}
+
+/* 項目名と値の 2 列。狭い画面では縦に積む (どちらでも同じ順に読める)。 */
+.detail-fields {
+  display: grid;
+  grid-template-columns: minmax(6rem, 10rem) 1fr;
+  gap: 0.15rem 0.9rem;
+  margin: 0;
+}
+
+.detail-fields dt {
+  color: var(--muted);
+}
+
+.detail-fields dd {
+  margin: 0;
+  /* 解説文は原文の改行を持ったまま入っている (ADR 0008)。詰めて 1 段落にしない。 */
+  white-space: pre-wrap;
+  /* 長い URL を溢れさせないための折り返し。**`anywhere` にはしない** — 中身を
+     測って大きさを決める容れ物 (地図の吹き出し) が、測るたびに最小幅を答える。 */
+  overflow-wrap: break-word;
+}
+
+@media (max-width: 40rem) {
+  .detail-fields {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .detail-fields dd {
+    margin-bottom: 0.5rem;
+  }
+}
+
+.detail-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+/* 附指定・指定等後に行った措置のような、組の並び。 */
+.detail-table {
+  width: auto;
+  white-space: normal;
+}
+
+.detail-table th,
+.detail-table td {
+  padding: 0.15rem 0.9rem 0.15rem 0;
+}
+
+.detail-siblings {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+}
+
+.detail-note {
+  color: var(--muted);
+}
+
+.detail-error {
+  margin: 0;
+  color: var(--error);
+}
+
+/* 吹き出しの中では、地図を隠さない高さに収めて中だけ送る。 */
+.map-popup .detail-body {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.map-popup .detail-fields {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+
+.map-popup .detail-fields dd {
+  margin-bottom: 0.4rem;
+}
+
 .more {
   margin-top: 1rem;
 }

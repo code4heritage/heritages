@@ -11,6 +11,7 @@
 // 一覧と地図で見えているものが食い違う。
 
 import { CELL_SIZE, cluster, countMappable } from "./cluster.js";
+import { createDetailBlock } from "./detail.js";
 import {
   DomUtil,
   Layer,
@@ -64,6 +65,9 @@ const CLUSTER_TEXT = "#fdfdfb";
 const POINT_FILL = "rgba(138, 28, 28, 0.9)";
 const POINT_EDGE = "#fdfdfb";
 const POINT_RADIUS = 4.5;
+
+// 吹き出しの幅の上限。項目名と値が並ぶので、ライブラリの既定 (300) より広く取る。
+const POPUP_MAX_WIDTH = 360;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
@@ -302,8 +306,9 @@ function drawCluster(context, item) {
   context.fillText(NUMBER_FORMAT.format(item.count), item.x, item.y);
 }
 
-// 点を押したときに出す吹き出し。**一覧と同じ情報 + 原本へのリンク**までに
-// 留める (項目をすべて並べる詳細ビューは Issue #32 §4)。
+// 点を押したときに出す吹き出し。一覧と同じ情報 + 原本へのリンクに、**一覧と
+// 同じ折りたたみ**を足す (Issue #32 §4)。地図から入った読み手が、項目を読むために
+// 一覧で同じものを探し直さずに済む。
 function showRecord(map, catalog, positions, index) {
   const record = catalog.record(index);
   const content = document.createElement("div");
@@ -331,8 +336,19 @@ function showRecord(map, catalog, positions, index) {
     .filter(Boolean)
     .join(" / ");
 
-  content.append(heading, meta);
-  createPopup()
+  // 既定の 300px では項目名と値が 1 語ずつで折り返す。ただし**地図より広くしない**
+  // (狭い画面では地図がそのまま吹き出しの上限になる)。高さは CSS で送る。
+  const popup = createPopup({ maxWidth: Math.min(POPUP_MAX_WIDTH, map.getSize().x - 40) });
+
+  // **吹き出しの大きさは中身を測って決まる** (Leaflet の `_updateLayout`)。
+  // 畳んだ状態で測ったままだと、開いても細いまま伸びる。開閉と読み込みの
+  // どちらでも測り直させる。
+  const detail = createDetailBlock(record, () => catalog.detail(index), {
+    onChange: () => popup.update(),
+  });
+
+  content.append(heading, meta, detail);
+  popup
     .setLatLng(map.unproject([positions.x[index], positions.y[index]], PROJECTION_ZOOM))
     .setContent(content)
     .openOn(map);

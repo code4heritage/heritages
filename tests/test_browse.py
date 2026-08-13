@@ -20,8 +20,10 @@ RECORDS_JS = Path(__file__).resolve().parents[1] / "site/records.js"
 # 3 データセット・2 軸の小さな索引。ビルドが書く形と同じ (build.py の
 # `_records_payload`)。
 PAYLOAD: dict[str, Any] = {
-    "schema_version": 1,
+    "schema_version": 2,
     "datasets": ["national-treasures", "historic-sites", "places-of-scenic-beauty"],
+    # データセットごとの JSON Lines。行は番号でここを指す (build.py の `files`)。
+    "files": [["data/26_kyoto.jsonl"], ["data/13_tokyo.jsonl"], ["data/13_tokyo.jsonl"]],
     "search_fields": ["name", "ridge_name", "name_kana", "ridge_name_kana", "address"],
     "axes": [
         {"key": "prefecture", "label": "所在都道府県", "values": ["京都府", "奈良県", "東京都"]},
@@ -29,6 +31,8 @@ PAYLOAD: dict[str, Any] = {
     ],
     "fields": [
         "dataset",
+        "file",
+        "line",
         "ledger_id",
         "managed_id",
         "name",
@@ -53,11 +57,14 @@ def _record(
     address: str,
     facets: list[list[int]],
     *,
+    line: int = 1,
     coordinates: tuple[float, float] | None = (35.0, 135.7),
 ) -> list[Any]:
     latitude, longitude = coordinates if coordinates else (None, None)
     return [
         dataset,
+        0,
+        line,
         "102",
         managed_id,
         name,
@@ -75,25 +82,40 @@ def _record(
 PAYLOAD["records"] = [
     _record(0, "1", "金堂", "こんどう", "京都市", [[0], [0]]),
     # 座標を持たない行。地図には出せないが一覧には出す。
-    _record(0, "2", "五重塔", "ごじゅうのとう", "奈良市", [[1], [0]], coordinates=None),
+    _record(0, "2", "五重塔", "ごじゅうのとう", "奈良市", [[1], [0]], line=2, coordinates=None),
     _record(1, "3", "社殿", "しゃでん", "京都市", [[0], [1]]),
     # 1 行が 1 つの軸に 2 つの値を持つ (401 の複合指定)。
     _record(2, "4", "庭園", "ていえん", "東京都", [[2], [2, 0]]),
+    # 同じ棟が別の種別にも現れる (複合指定。ADR 0012)。キーが同じで種別が違う。
+    _record(1, "4", "庭園", "ていえん", "東京都", [[2], [2, 0]], line=2),
 ]
 
-LABELS = {
-    "national-treasures": "国宝（建造物）",
-    "historic-sites": "史跡",
-    "places-of-scenic-beauty": "名勝",
-}
+# index.json のデータセット。呼び名も項目の呼び名も置き場も meta.json が正本 (ADR 0014)。
+DATASETS = [
+    {
+        "repo": "national-treasures",
+        "path": "datasets/national-treasures",
+        "meta": {"dataset": {"name": "国宝（建造物）"}, "labels": {"name": "名称"}},
+    },
+    {
+        "repo": "historic-sites",
+        "path": "datasets/historic-sites",
+        "meta": {"dataset": {"name": "史跡"}, "labels": {"name": "名称"}},
+    },
+    {
+        "repo": "places-of-scenic-beauty",
+        "path": "datasets/places-of-scenic-beauty",
+        "meta": {"dataset": {"name": "名勝"}, "labels": {"name": "名称"}},
+    },
+]
 
 _HARNESS = """
 import {{ createCatalog }} from {module};
 let input = "";
 process.stdin.setEncoding("utf8");
 for await (const chunk of process.stdin) input += chunk;
-const {{ payload, labels, queries }} = JSON.parse(input);
-const catalog = createCatalog(payload, labels);
+const {{ payload, datasets, queries }} = JSON.parse(input);
+const catalog = createCatalog(payload, datasets);
 const answers = queries.map(({{ query, selection }}) => {{
   const chosen = Object.fromEntries(
     catalog.axes.map((axis) => [axis.key, new Set(selection?.[axis.key] ?? [])]),
@@ -103,6 +125,7 @@ const answers = queries.map(({{ query, selection }}) => {{
     names: matched.map((index) => catalog.record(index).name),
     datasets: matched.map((index) => catalog.record(index).dataset),
     mappable: matched.map((index) => catalog.record(index).mappable),
+    siblings: matched.map((index) => catalog.record(index).siblings),
     counts: Object.fromEntries(catalog.axes.map((axis, position) => [axis.key, counts[position]])),
     axes: catalog.axes.map((axis) => ({{ key: axis.key, label: axis.label, values: axis.values }})),
   }};
@@ -115,7 +138,7 @@ def _ask(node: str, queries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     script = _HARNESS.format(module=json.dumps(RECORDS_JS.as_posix()))
     completed = subprocess.run(
         [node, "--input-type=module", "-e", script],
-        input=json.dumps({"payload": PAYLOAD, "labels": LABELS, "queries": queries}),
+        input=json.dumps({"payload": PAYLOAD, "datasets": DATASETS, "queries": queries}),
         capture_output=True,
         text=True,
         check=False,
@@ -135,8 +158,9 @@ def test_the_dataset_becomes_the_first_axis(node: str) -> None:
 
 
 def test_an_empty_query_matches_everything(node: str) -> None:
+    """複合指定は行として 2 つある。片方を隠すと、その種別で絞ったときに消える。"""
     [answer] = _ask(node, [{}])
-    assert answer["names"] == ["金堂", "五重塔", "社殿", "庭園"]
+    assert answer["names"] == ["金堂", "五重塔", "社殿", "庭園", "庭園"]
 
 
 def test_the_query_matches_the_normalized_text(node: str) -> None:
@@ -159,8 +183,8 @@ def test_axes_are_and_ed(node: str) -> None:
 def test_a_row_with_two_values_on_one_axis_matches_either(node: str) -> None:
     """401 の複合指定 (ADR 0012)。庭園でも寺院でも当たる。"""
     [garden, temple] = _ask(node, [{"selection": {"types": [2]}}, {"selection": {"types": [0]}}])
-    assert garden["names"] == ["庭園"]
-    assert temple["names"] == ["金堂", "五重塔", "庭園"]
+    assert garden["names"] == ["庭園", "庭園"]
+    assert temple["names"] == ["金堂", "五重塔", "庭園", "庭園"]
 
 
 def test_the_query_and_the_facets_apply_together(node: str) -> None:
@@ -171,7 +195,7 @@ def test_the_query_and_the_facets_apply_together(node: str) -> None:
 def test_counts_ignore_the_selection_on_their_own_axis(node: str) -> None:
     """自分の軸まで数に入れると、1 つ選んだ瞬間に他の値が 0 件になって選び直せない。"""
     [answer] = _ask(node, [{"selection": {"prefecture": [0]}}])
-    assert answer["counts"]["prefecture"] == [2, 1, 1]  # 選んでいない値も選べる
+    assert answer["counts"]["prefecture"] == [2, 1, 2]  # 選んでいない値も選べる
     assert answer["counts"]["types"] == [1, 1, 0]  # 他の軸は京都府に絞った件数
 
 
@@ -186,6 +210,66 @@ def test_a_row_without_coordinates_is_still_listed(node: str) -> None:
     [answer] = _ask(node, [{"query": "ごじゅうのとう"}])
     assert answer["names"] == ["五重塔"]
     assert answer["mappable"] == [False]
+
+
+def test_a_shared_building_names_the_other_datasets(node: str) -> None:
+    """複合指定 (ADR 0012)。**種別ごとのサイトでは表せなかったもの**なので、
+    詳細では同じ棟がどこにも入っているかを併記する。"""
+    [gardens, hall] = _ask(node, [{"query": "ていえん"}, {"query": "こんどう"}])
+    assert gardens["datasets"] == ["名勝", "史跡"]
+    assert gardens["siblings"] == [["史跡"], ["名勝"]]
+    # 1 つの種別にしかない行に、相手はいない。
+    assert hall["siblings"] == [[]]
+
+
+_DETAIL_HARNESS = """
+import {{ createCatalog }} from {module};
+let input = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) input += chunk;
+const {{ payload, datasets, indexes }} = JSON.parse(input);
+const places = [];
+const catalog = createCatalog(payload, datasets, {{
+  source: {{
+    read: async (place) => {{
+      places.push(place);
+      return {{ name: "元の行", unknown: "索引には無い項目" }};
+    }},
+  }},
+}});
+const fields = [];
+for (const index of indexes) fields.push(await catalog.detail(index));
+process.stdout.write(JSON.stringify({{ places, fields }}));
+"""
+
+
+def _detail(node: str, indexes: list[int]) -> dict[str, Any]:
+    script = _DETAIL_HARNESS.format(module=json.dumps(RECORDS_JS.as_posix()))
+    completed = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        input=json.dumps({"payload": PAYLOAD, "datasets": DATASETS, "indexes": indexes}),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return dict(json.loads(completed.stdout))
+
+
+def test_the_detail_reads_the_row_the_index_points_at(node: str) -> None:
+    """索引は行の出どころだけを持ち、項目は元の JSON Lines から読む (Issue #32 §4)。
+
+    置き場は `meta.json` の側 (index.json の `path`) と索引の `files` から組み立てる。
+    """
+    answer = _detail(node, [4])
+    assert answer["places"] == [
+        {"url": "./datasets/historic-sites/data/13_tokyo.jsonl", "line": 2}
+    ]
+    assert [(field["label"], field["value"]) for field in answer["fields"][0]] == [
+        ("名称", "元の行"),
+        # `labels` に無いキーも落とさない (上流に項目が増えても黙って消えない)。
+        ("unknown", "索引には無い項目"),
+    ]
 
 
 _LIMIT_HARNESS = """

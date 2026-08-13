@@ -15,7 +15,7 @@ const INDEX_URL = "./index.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
 // 食い違ったまま描くと画面のどこかが黙って空になるので、先に止める。
-const SUPPORTED_SCHEMA_VERSION = 1;
+const SUPPORTED_SCHEMA_VERSION = 2;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
@@ -32,7 +32,7 @@ async function main() {
   }
   try {
     const payload = await fetchRecords();
-    await startBrowsing(payload, datasetLabels(index));
+    await startBrowsing(payload, index.datasets);
   } catch (error) {
     showError("browse-error", error);
   }
@@ -59,16 +59,10 @@ function render(index) {
   renderAttribution(index.datasets);
 }
 
-// 種別の呼び名の正本は meta.json (ADR 0014)。行の索引はリポジトリ名しか
-// 持たないので、表示名はこちらから渡す。
-function datasetLabels(index) {
-  return Object.fromEntries(
-    index.datasets.map(({ repo, meta }) => [repo, meta.dataset?.name ?? repo]),
-  );
-}
-
-async function startBrowsing(payload, labels) {
-  const catalog = createCatalog(payload, labels);
+// 呼び名も項目の呼び名も置き場も、正本は meta.json (ADR 0014)。行の索引は
+// リポジトリ名しか持たないので、index.json のデータセットをそのまま渡す。
+async function startBrowsing(payload, datasets) {
+  const catalog = createCatalog(payload, datasets);
   document.getElementById("browse-loading").hidden = true;
   // 地図は自分の大きさを容れ物から測るので、先に見える状態にしておく。
   document.getElementById("browse").hidden = false;

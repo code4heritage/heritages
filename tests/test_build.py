@@ -97,6 +97,45 @@ def test_the_index_drops_coordinates_outside_japan(data_dir: Path, tmp_path: Pat
     assert report.with_coordinates > report.mapped  # type: ignore[attr-defined]
 
 
+def _line_at(out: Path, payload: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+    """索引の道しるべ (`file` / `line`) が指す元の行を、詳細ビューと同じ手順で読む。"""
+    repo = payload["datasets"][entry["dataset"]]
+    path = out / "datasets" / repo / payload["files"][entry["dataset"]][entry["file"]]
+    line = path.read_text(encoding="utf-8").split("\n")[entry["line"] - 1]
+    return dict(json.loads(line))
+
+
+def test_the_index_points_at_the_row_it_came_from(data_dir: Path, tmp_path: Path) -> None:
+    """索引に全項目を入れず、出どころだけ持つ (Issue #32 §4)。"""
+    out = tmp_path / "dist"
+    _build(data_dir, out)
+    payload = _records(out)
+    assert _line_at(out, payload, payload["by_key"]["00001235"])["name"] == "塔"
+
+
+def test_rows_that_share_a_key_point_at_their_own_line(data_dir: Path, tmp_path: Path) -> None:
+    """**キーでは足りない。**102 は 1 指定が複数の棟に展開され、同じ
+    `(台帳ID, 管理対象ID)` の行が同じファイルに並ぶ。"""
+    make_dataset(
+        data_dir,
+        "important-cultural-properties",
+        {
+            "26_kyoto.jsonl": [
+                record("102", "00005555", name="本堂", ridge_name="本堂"),
+                record("102", "00005555", name="本堂", ridge_name="経蔵"),
+            ]
+        },
+    )
+    out = tmp_path / "dist"
+    _build(data_dir, out)
+    payload = _records(out)
+    entries = [
+        dict(zip(payload["fields"], values, strict=True)) for values in payload["records"]
+    ]
+    shared = [entry for entry in entries if entry["managed_id"] == "00005555"]
+    assert [_line_at(out, payload, entry)["ridge_name"] for entry in shared] == ["本堂", "経蔵"]
+
+
 def test_the_index_carries_the_search_text(data_dir: Path, tmp_path: Path) -> None:
     make_dataset(
         data_dir,

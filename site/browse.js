@@ -6,6 +6,8 @@
 //
 // 仮想スクロールは入れない。一覧は先頭 200 件を描き、「さらに 200 件」で伸ばす。
 
+import { createDetailBlock } from "./detail.js";
+
 const PAGE_SIZE = 200;
 
 // 軸ごとに最初から見せる値の数。時代は 211 値あるので、全部並べると
@@ -169,10 +171,12 @@ function renderFacets(catalog, container, handlers) {
 }
 
 function renderList(list, catalog, indexes) {
-  list.replaceChildren(...indexes.map((index) => item(catalog.record(index))));
+  list.replaceChildren(
+    ...indexes.map((index) => item(catalog.record(index), () => catalog.detail(index))),
+  );
 }
 
-function item(record) {
+function item(record, load) {
   const element = document.createElement("li");
   element.className = "record";
 
@@ -205,5 +209,8 @@ function item(record) {
     note.textContent = "地図に位置がない";
     element.append(note);
   }
+  // 持っている項目はすべて読めるようにする (Issue #32 §4)。原本へのリンクは
+  // 残す — 写真や図面はあちらにしかない (ADR 0007)。
+  element.append(createDetailBlock(record, load));
   return element;
 }
