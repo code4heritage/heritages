@@ -186,3 +186,60 @@ def test_a_row_without_coordinates_is_still_listed(node: str) -> None:
     [answer] = _ask(node, [{"query": "ごじゅうのとう"}])
     assert answer["names"] == ["五重塔"]
     assert answer["mappable"] == [False]
+
+
+_LIMIT_HARNESS = """
+import {{ visibleLimit }} from {module};
+let input = "";
+process.stdin.setEncoding("utf8");
+for await (const chunk of process.stdin) input += chunk;
+process.stdout.write(
+  JSON.stringify(
+    JSON.parse(input).map(({{ axis, expanded }}) => visibleLimit(axis, expanded)),
+  ),
+);
+"""
+
+
+def _limits(node: str, cases: list[dict[str, Any]]) -> list[Any]:
+    script = _LIMIT_HARNESS.format(
+        module=json.dumps((RECORDS_JS.parent / "browse.js").as_posix())
+    )
+    completed = subprocess.run(
+        [node, "--input-type=module", "-e", script],
+        input=json.dumps(cases),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    # JSON に Infinity は無いので null で返る。
+    return list(json.loads(completed.stdout))
+
+
+def test_the_area_axis_shows_every_value(node: str) -> None:
+    """所在都道府県は途中で切らない (Issue #7)。
+
+    コード順に並べると最初に見えるのは「北海道〜栃木県」で、上位 10 値が覆うのは
+    全体の 41% にすぎない。切ると探したい県にたどり着けない。
+    """
+    [limit] = _limits(node, [{"axis": {"key": "prefecture", "order": "area"}, "expanded": False}])
+    assert limit is None  # Infinity
+
+
+def test_the_other_axes_are_still_cut_at_ten(node: str) -> None:
+    """時代は 211 値ある。全部並べると一覧より絞り込みの方が長くなる。"""
+    limits = _limits(
+        node,
+        [
+            {"axis": {"key": "period", "order": "period"}, "expanded": False},
+            {"axis": {"key": "criteria", "order": "count"}, "expanded": False},
+        ],
+    )
+    assert limits == [10, 10]
+
+
+def test_expanding_an_axis_still_shows_everything(node: str) -> None:
+    """「ほか N 件を表示」を押したあとの振る舞いは変えない。"""
+    [limit] = _limits(node, [{"axis": {"key": "period", "order": "period"}, "expanded": True}])
+    assert limit is None

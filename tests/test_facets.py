@@ -213,3 +213,112 @@ def test_an_axis_without_a_label_falls_back_to_the_key(tmp_path: Path) -> None:
         facets={"prefecture": {"東京都": 1}},
     )
     assert _axes(data_dir)[0].label == "prefecture"
+
+
+def _by_area(data_dir: Path, files: dict[str, list[dict[str, Any]]]) -> list[Axis]:
+    """地域ごとにファイルを分けたデータセット (データリポジトリと同じ形)。"""
+    vocabulary: dict[str, int] = {}
+    for rows in files.values():
+        for row in rows:
+            vocabulary[row["prefecture"]] = vocabulary.get(row["prefecture"], 0) + 1
+    make_dataset(data_dir, "a", files, facets={"prefecture": vocabulary})
+    return _axes(data_dir)
+
+
+def test_the_area_axis_is_ordered_by_the_code_not_by_the_count(tmp_path: Path) -> None:
+    """所在都道府県は総務省の都道府県コード順 (Issue #7)。
+
+    件数順だと探したい県の位置が予測できず、件数は更新のたびに動くので、
+    同じ県が先月と違う場所に来る。コードはデータの側 (ファイル名) にある。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_area(
+        data_dir,
+        {
+            # 件数順なら 京都府 → 東京都 → 北海道 になる並び。
+            "01_hokkaido.jsonl": [record("101", "1", prefecture="北海道")],
+            "13_tokyo.jsonl": [record("101", f"1{n}", prefecture="東京都") for n in range(2)],
+            "26_kyoto.jsonl": [record("101", f"2{n}", prefecture="京都府") for n in range(3)],
+        },
+    )
+    assert axes[0].values == ("北海道", "東京都", "京都府")
+    assert axes[0].order == "area"
+
+
+def test_the_area_order_does_not_spread_to_other_axes(tmp_path: Path) -> None:
+    """地域ごとにファイルが分かれていても、並べ替わるのは所在都道府県だけ。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    make_dataset(
+        data_dir,
+        "a",
+        {
+            "01_hokkaido.jsonl": [record("101", "1", prefecture="北海道", types="住宅")],
+            "13_tokyo.jsonl": [
+                record("101", f"2{n}", prefecture="東京都", types="倉庫") for n in range(2)
+            ],
+        },
+        facets={
+            "prefecture": {"北海道": 1, "東京都": 2},
+            "types": {"住宅": 1, "倉庫": 2},
+        },
+    )
+    axes = {axis.key: axis for axis in _axes(data_dir)}
+    assert axes["prefecture"].order == "area"
+    assert axes["types"].order == "count"
+    # 種別は件数の多い順のまま (ファイルが 1 つずつでも巻き込まれない)。
+    assert axes["types"].values == ("倉庫", "住宅")
+
+
+def test_the_area_order_falls_back_when_the_naming_breaks(tmp_path: Path) -> None:
+    """ファイル名からコードが読めなくなったら件数順へ戻す (Issue #7)。
+
+    この並びはデータリポジトリの命名という別の約束に乗っている。黙って
+    コード順のつもりで壊れた並びを出すより、件数順に戻る方がよい。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_area(
+        data_dir,
+        {
+            "hokkaido.jsonl": [record("101", "1", prefecture="北海道")],
+            "tokyo.jsonl": [record("101", f"1{n}", prefecture="東京都") for n in range(2)],
+        },
+    )
+    assert axes[0].values == ("東京都", "北海道")
+    assert axes[0].order == "count"
+
+
+def test_two_areas_in_one_file_is_not_an_area_axis(tmp_path: Path) -> None:
+    """1 つのファイルに 2 つの値が入っていれば、コードは値を決められない。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_area(
+        data_dir,
+        {
+            "13_tokyo.jsonl": [
+                record("101", "1", prefecture="東京都"),
+                record("101", "2", prefecture="北海道"),
+            ],
+        },
+    )
+    assert axes[0].order == "count"
+
+
+def test_the_period_axis_keeps_its_own_order(tmp_path: Path) -> None:
+    """地域の見分けが時代を巻き込まないこと。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    make_dataset(
+        data_dir,
+        "a",
+        {
+            "01_hokkaido.jsonl": [record("102", "1", period="明治", western_year="1887")],
+            "13_tokyo.jsonl": [record("102", "2", period="江戸", western_year="1750")],
+        },
+        facets={"period": {"明治": 1, "江戸": 1}},
+    )
+    axis = _axes(data_dir)[0]
+    assert axis.values == ("江戸", "明治")
+    assert axis.order == "period"

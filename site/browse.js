@@ -12,6 +12,18 @@ const PAGE_SIZE = 200;
 // 一覧より facet の方が長くなる。
 const VISIBLE_VALUES = 10;
 
+// **地域の軸だけは切らない** (Issue #7)。並びが総務省の都道府県コード順なので、
+// 上位 10 値で切ると見えるのは「北海道〜栃木県」だけになり、探したい県に
+// たどり着けない (上位 10 値が覆うのは全体の 41%)。47 値なら全部並べても
+// 一覧を押しのけない。
+const UNTRUNCATED_ORDER = "area";
+
+// 軸ごとに、最初から見せる値の数。**描画は DOM が要るが、この規則は要らない**ので
+// 切り出しておく (tests/test_browse.py が node から確かめる)。
+export function visibleLimit(axis, expanded) {
+  return expanded || axis.order === UNTRUNCATED_ORDER ? Infinity : VISIBLE_VALUES;
+}
+
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
 // `onResults` は絞り込みの結果 (行番号の配列) を受け取る。地図はこれを見て
@@ -132,7 +144,7 @@ function renderFacets(catalog, container, handlers) {
   return {
     update(counts, selection, expanded) {
       groups.forEach(({ axis, group, chosen, items, more }, position) => {
-        const isExpanded = expanded.has(axis.key);
+        const limit = visibleLimit(axis, expanded.has(axis.key));
         let visible = 0;
         let hidden = 0;
         items.forEach(({ item, input, count }, number) => {
@@ -141,7 +153,7 @@ function renderFacets(catalog, container, handlers) {
           count.textContent = NUMBER_FORMAT.format(found);
           // 0 件の値は隠す。選んでいるものは、外せるように残す。
           const usable = found > 0 || input.checked;
-          const room = isExpanded || visible < VISIBLE_VALUES;
+          const room = visible < limit;
           item.hidden = !usable || !room;
           if (usable && room) visible += 1;
           else if (usable) hidden += 1;
