@@ -45,7 +45,9 @@ from .facets import Axis, axis_keys, build_axes, positions
 from .search import SEARCH_FIELDS
 
 # 生成物のスキーマ版。フロントがこの版を見て、読めない索引で黙って壊れるのを防ぐ。
-SITE_SCHEMA_VERSION = 1
+# 2 で行の出どころ (`files` / `file` / `line`) が入った — 詳細ビューが JSON Lines を
+# その場で読むための道しるべ (Issue #32 §4)。
+SITE_SCHEMA_VERSION = 2
 
 DATASETS_DIRNAME = "datasets"
 INDEX_FILENAME = "index.json"
@@ -193,12 +195,29 @@ def _records_payload(
     `null` にして、一覧が「地図に位置がない」と示せるようにする — 誤った座標を
     渡して地図に置かせるより、位置が無いと言う方が正しい (`checks` が件数と実例を
     報告に出す)。
+
+    **行の全項目は索引に入れず、出どころ (`file` / `line`) だけ持つ** (Issue #32 §4)。
+    解説文まで抱えると索引が桁違いに重くなるうえ、配っている JSON Lines と同じ値を
+    2 か所に持つことになる。詳細ビューはこの道しるべで元の行を読みに行く。
+    **行番号が要るのは `(台帳ID, 管理対象ID)` が一意でないため** — 102 は 1 指定が
+    複数の棟に展開され、同じキーの行が同じファイルに並ぶ。
     """
     numbers = positions(axes)
     axis_positions = [(axis, keys.index(axis.key)) for axis in axes]
+    files = [
+        [f"{DATA_DIRNAME}/{path.name}" for path in data_files(dataset)] for dataset in datasets
+    ]
+    file_numbers = {
+        (dataset_index, path): number
+        for dataset_index, paths in enumerate(files)
+        for number, path in enumerate(paths)
+    }
     return {
         "schema_version": SITE_SCHEMA_VERSION,
         "datasets": [dataset.repo for dataset in datasets],
+        # データセットごとの JSON Lines。行はここへの番号で出どころを指す
+        # (ファイル名を 2 万行ぶん繰り返さない)。
+        "files": files,
         "search_fields": list(SEARCH_FIELDS),
         "axes": [
             # `order` は並びの根拠。画面はこれを見て畳み方を決める (Issue #7)。
@@ -212,6 +231,8 @@ def _records_payload(
         ],
         "fields": [
             "dataset",
+            "file",
+            "line",
             "ledger_id",
             "managed_id",
             "name",
@@ -227,6 +248,8 @@ def _records_payload(
         "records": [
             [
                 row.dataset_index,
+                file_numbers[(row.dataset_index, row.path)],
+                row.line,
                 row.ledger_id,
                 row.managed_id,
                 row.name,

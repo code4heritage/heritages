@@ -8,12 +8,13 @@
 // - 値ごとの件数は**その軸を除いた絞り込み**で数える。自分の軸まで含めて
 //   数えると、1 つ選んだ瞬間に他の値が全部 0 件になって選び直せなくなる
 
+import { createRecordSource, fieldsOf } from "./detail.js";
 import { normalize } from "./normalize.js";
 
 const RECORDS_URL = "./records.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
-const SUPPORTED_SCHEMA_VERSION = 1;
+const SUPPORTED_SCHEMA_VERSION = 2;
 
 // データセット (種別) は絞り込みの主軸だが、meta.json の facets には出てこない。
 // 種別横断のサイトなので、ここだけは索引の datasets から軸を作る。
@@ -35,17 +36,27 @@ export async function fetchRecords() {
   return payload;
 }
 
-// 索引を絞り込める形にする。`datasetLabels` は index.json 由来の表示名で、
-// 索引が持つのはリポジトリ名だけ (呼び名の正本は meta.json)。
-export function createCatalog(payload, datasetLabels = {}) {
+// 索引を絞り込める形にする。`datasets` は index.json のデータセット
+// (`{ repo, path, meta }`) で、索引が持つのはリポジトリ名だけ — 呼び名も項目の
+// 呼び名も置き場も、正本は meta.json の側にある (ADR 0014)。
+export function createCatalog(payload, datasets = [], { source = createRecordSource() } = {}) {
   const column = Object.fromEntries(payload.fields.map((field, index) => [field, index]));
   const records = payload.records;
+  const info = new Map(
+    datasets.map(({ repo, path, meta }) => [
+      repo,
+      { name: meta?.dataset?.name ?? repo, path, labels: meta?.labels ?? {} },
+    ]),
+  );
+  // 複合指定 (同じ棟が複数の種別に現れる) の相手。**要るまで作らない** —
+  // 2 万行を数える手間を、詳細を 1 件も開かない読み手に払わせない。
+  let shared = null;
 
   const axes = [
     {
       key: DATASET_AXIS_KEY,
       label: DATASET_AXIS_LABEL,
-      values: payload.datasets.map((repo) => datasetLabels[repo] ?? repo),
+      values: payload.datasets.map((repo) => info.get(repo)?.name ?? repo),
       // データセットは 1 行に 1 つ。列の値がそのまま語彙の番号になっている。
       valuesOf: (record) => [record[column.dataset]],
     },
@@ -60,11 +71,49 @@ export function createCatalog(payload, datasetLabels = {}) {
     })),
   ];
 
+  // 同じ `(台帳ID, 管理対象ID)` を持つ行が、どのデータセットに現れるか。
+  // 102 は 1 指定が複数の棟に展開されるので、同じ種別の中にも同じキーが並ぶ。
+  function siblingsOf(record) {
+    if (!shared) {
+      shared = new Map();
+      for (const other of records) {
+        const key = `${other[column.ledger_id]}\n${other[column.managed_id]}`;
+        const found = shared.get(key);
+        if (found) found.add(other[column.dataset]);
+        else shared.set(key, new Set([other[column.dataset]]));
+      }
+    }
+    const key = `${record[column.ledger_id]}\n${record[column.managed_id]}`;
+    return [...(shared.get(key) ?? [])]
+      .filter((number) => number !== record[column.dataset])
+      .map((number) => {
+        const repo = payload.datasets[number];
+        return info.get(repo)?.name ?? repo;
+      });
+  }
+
+  // 元の行の置き場。索引が持つのは番号だけで、ファイル名は `files` が持つ。
+  function sourceOf(record) {
+    const repo = payload.datasets[record[column.dataset]];
+    const path = info.get(repo)?.path;
+    const file = payload.files?.[record[column.dataset]]?.[record[column.file]];
+    if (!path || !file) return null;
+    return { url: `./${path}/${file}`, line: record[column.line] };
+  }
+
   return {
     axes,
     total: records.length,
     coordinates: coordinatesOf(records, column),
-    record: (index) => describe(records[index], column, payload.datasets, datasetLabels),
+    record: (index) => describe(records[index], column, payload.datasets, info, siblingsOf),
+    // 元の行を読んで、並べられる形の項目にして返す。**開かれたときだけ呼ぶ**。
+    detail: async (index) => {
+      const record = records[index];
+      const place = sourceOf(record);
+      if (!place) throw new Error("元のデータの置き場が索引に無い");
+      const repo = payload.datasets[record[column.dataset]];
+      return fieldsOf(await source.read(place), info.get(repo)?.labels ?? {});
+    },
     filter: (query, selection) => filter(records, axes, column.search, query, selection),
   };
 }
@@ -81,10 +130,15 @@ function coordinatesOf(records, column) {
   };
 }
 
-function describe(record, column, repos, datasetLabels) {
+function describe(record, column, repos, info, siblingsOf) {
   const repo = repos[record[column.dataset]];
   return {
-    dataset: datasetLabels[repo] ?? repo,
+    dataset: info.get(repo)?.name ?? repo,
+    // 同じ棟が現れる他の種別 (ADR 0012)。種別ごとのサイトでは表せなかったもの。
+    // **読まれたときに数える** — 一覧に 200 件並べるたびに 2 万行を数えない。
+    get siblings() {
+      return siblingsOf(record);
+    },
     ledgerId: record[column.ledger_id],
     managedId: record[column.managed_id],
     name: record[column.name],
