@@ -175,13 +175,10 @@ const PointLayer = Layer.extend({
     this._canvas.remove();
   },
 
+  // ズームの終わりにも `moveend` が続けて上がる (Leaflet の `_moveEnd`) ので、
+  // `zoomend` は取らない — 2 万点を 2 回描き直すことになる。
   getEvents() {
-    return {
-      viewreset: this._reset,
-      resize: this._reset,
-      moveend: this._reset,
-      zoomend: this._reset,
-    };
+    return { viewreset: this._reset, resize: this._reset, moveend: this._reset };
   },
 
   show(matched) {
