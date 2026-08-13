@@ -55,6 +55,17 @@ h2 {
   margin-bottom: 1rem;
 }
 
+/* 表の値の読み方を添える一文。要約ではないので、要約の直後に詰めて置く。 */
+.note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 0 0 1rem;
+}
+
+.summary + .note {
+  margin-top: -0.75rem;
+}
+
 .table-wrap {
   overflow-x: auto;
 }

@@ -14,11 +14,16 @@
     <script type="module" src="./app.js"></script>
   </head>
   <body>
+    <!--
+      入口に置くのは「何が見られるか」だけにする (Issue #5)。取得の頻度・方法・
+      分割の軸といった運用の内部は、見に来た人が要るものではない。頻度の正本は
+      クローラー側にあるので、数字をこちらへ写すと片方だけ古くなる。
+    -->
     <header class="site-header">
       <h1>国指定文化財等データ</h1>
-      <p class="lead">
-        文化庁「国指定文化財等データベース」から取り出した建造物・記念物のデータを、
-        種別ごとのデータセットとして配っています。
+      <p class="lead" id="intro">
+        文化庁「国指定文化財等データベース」を定期的に確認して、そこにある建造物・
+        記念物のデータを種別ごとにまとめ、地図と一覧で見られるようにしています。
       </p>
     </header>
 
@@ -97,6 +102,14 @@
       <section aria-labelledby="datasets-heading">
         <h2 id="datasets-heading">データセット</h2>
         <p id="summary" class="summary">読み込んでいます…</p>
+        <!--
+          「利用日」は出典表示の一部で、消せる表示ではない (ADR 0014 / ADR 0007)。
+          出す以上は、それが何の日付なのかも読めるようにする (Issue #5)。
+        -->
+        <p id="accessed-note" class="note">
+          「利用日」は、その種別のデータを国指定文化財等データベースから取り出した日です。
+          ここに出ているのはその時点の内容です。
+        </p>
         <div class="table-wrap">
           <table id="datasets">
             <thead>
