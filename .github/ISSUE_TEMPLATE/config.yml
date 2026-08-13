@@ -1,7 +1,11 @@
 # GitHub のアカウントが無い人にも窓口を出す (Issue #6)。
-# アドレスは難読化せずそのまま書く — 届かなければ窓口の意味が無い。
+#
+# **url に mailto: は書けない。**GitHub は http(s) 以外の contact_links を、
+# エラーも出さずに選択画面から落とす (2026-08-13 に実測。テンプレートだけが出て
+# 窓口が消える)。繋ぎ先は画面の「間違いを見つけたら」にして、アドレスは about に
+# 書く — 選択画面からそのまま読めるようにするため。難読化はしない。
 blank_issues_enabled: true
 contact_links:
-  - name: GitHub のアカウントが無いとき (メール)
-    url: mailto:c4h-support@googlegroups.com
-    about: 誤りや不具合をメールで知らせる。原本ページの URL を添えてください。
+  - name: メールで知らせる (GitHub のアカウントが無いとき)
+    url: https://code4heritage.github.io/heritages/#feedback
+    about: c4h-support@googlegroups.com へ。原本ページの URL を添えてください。
