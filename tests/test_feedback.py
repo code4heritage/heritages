@@ -25,6 +25,9 @@ TEMPLATE_DIR = ROOT / ".github" / "ISSUE_TEMPLATE"
 SUPPORT_EMAIL = "c4h-support@googlegroups.com"
 ISSUE_FORM_URL = "https://github.com/code4heritage/heritages/issues/new/choose"
 
+# Issue の選択画面から窓口へ繋ぐ先。画面の「間違いを見つけたら」に落とす。
+CONTACT_LINK_URL = "https://code4heritage.github.io/heritages/#feedback"
+
 EMAIL = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
 
 
@@ -77,10 +80,25 @@ def test_the_data_error_template_asks_for_the_original_page() -> None:
 
 
 def test_the_template_chooser_offers_the_email() -> None:
-    """アカウントの無い人は Issue を立てられない。選択画面から窓口へ出す。"""
+    """アカウントの無い人は Issue を立てられない。選択画面から窓口へ出す。
+
+    アドレスは `about` に書く。**`url` に `mailto:` は書けない** — GitHub は
+    http(s) 以外の contact_links を、エラーも出さずに選択画面から落とす
+    (2026-08-13 に実測)。書けたつもりで窓口だけが消えるので、ここで止める。
+    """
     text = (TEMPLATE_DIR / "config.yml").read_text(encoding="utf-8")
     assert "contact_links" in text
-    assert f"mailto:{SUPPORT_EMAIL}" in text
+    assert f"url: {CONTACT_LINK_URL}" in text
+    assert SUPPORT_EMAIL in text
+    # 理由はコメントに書いてある。見るのは GitHub が読む行だけ。
+    settings = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    assert "mailto:" not in "\n".join(settings)
+
+
+def test_the_contact_link_lands_on_the_footer_notice() -> None:
+    """繋ぎ先は画面の「間違いを見つけたら」。id が消えるとページの頭に落ちる。"""
+    anchor = CONTACT_LINK_URL.rsplit("#", maxsplit=1)[1]
+    assert f'id="{anchor}"' in _index()
 
 
 def test_the_address_does_not_drift_between_the_two_places() -> None:
