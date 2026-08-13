@@ -61,8 +61,21 @@ export function createCatalog(payload, datasetLabels = {}) {
   return {
     axes,
     total: records.length,
+    coordinates: coordinatesOf(records, column),
     record: (index) => describe(records[index], column, payload.datasets, datasetLabels),
     filter: (query, selection) => filter(records, axes, column.search, query, selection),
+  };
+}
+
+// 地図が読む座標。行ごとにオブジェクトを引かずに済むよう、列ごとの数値の並びで
+// 渡す (2 万行を毎回なぞるため)。
+//
+// **地図に置けない行は `NaN`。**索引では `null` で来るが、そのまま数値の並びに
+// 入れると 0 になり、アフリカ沖 (緯度 0・経度 0) に点が立つ。
+function coordinatesOf(records, column) {
+  return {
+    latitudes: Float64Array.from(records, (record) => record[column.latitude] ?? NaN),
+    longitudes: Float64Array.from(records, (record) => record[column.longitude] ?? NaN),
   };
 }
 

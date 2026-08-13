@@ -160,6 +160,95 @@ button:hover {
   border-color: var(--accent);
 }
 
+/* --- 地図 (Issue #32 §3) --- */
+
+.map-block {
+  margin-bottom: 1.5rem;
+}
+
+.map-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.map-head .summary {
+  margin-bottom: 0.4rem;
+}
+
+.map-tiles {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0 0 0.4rem;
+  padding: 0;
+  border: 0;
+  font-size: 0.9rem;
+}
+
+.map-tiles legend {
+  float: left; /* legend は既定で幅いっぱいを取る。横並びに戻す。 */
+  padding: 0;
+  margin-right: 0.6rem;
+  color: var(--muted);
+}
+
+.map-tiles > div {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.map-tile {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  cursor: pointer;
+}
+
+/* 出典を地図の隅に重ねるための入れ物 (ADR 0016)。 */
+.map-frame {
+  position: relative;
+}
+
+.map {
+  height: min(60vh, 30rem);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  /* タイルは明るい前提で作られている。暗い配色でも地図の中だけは白地。 */
+  background: #f4f4f2;
+}
+
+/* 地図が見えている間ずっと見えるところに出す。畳めないし、隠せない。 */
+.map-credit {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 800; /* Leaflet のコントロールと同じ層 */
+  margin: 0;
+  padding: 0.1rem 0.5rem;
+  border-top-left-radius: 4px;
+  background: rgba(253, 253, 251, 0.85);
+  color: #1b1b19;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.map-credit a {
+  color: #6b4f1d;
+}
+
+/* 点と丸は canvas に描く。マウスの当たり判定はレイヤ側が持つので、
+   canvas 自身はクリックを受けない (地図の掴み・二本指の操作を邪魔しない)。 */
+.map-points {
+  pointer-events: none;
+}
+
+.map-popup .record-name {
+  font-size: 1rem;
+}
+
 /* 広い画面では絞り込みを横に置く。狭ければ縦に積む (画面幅で切り替えるだけで、
    どちらでも同じ順に読める)。 */
 .browse-body {

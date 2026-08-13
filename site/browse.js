@@ -14,7 +14,10 @@ const VISIBLE_VALUES = 10;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
-export function createBrowser(catalog, elements) {
+// `onResults` は絞り込みの結果 (行番号の配列) を受け取る。地図はこれを見て
+// 描き直す — **地図に別の絞り込みを持たせない**ので、一覧と地図に出るものが
+// 食い違わない (Issue #32 §3)。
+export function createBrowser(catalog, elements, { onResults } = {}) {
   const selection = Object.fromEntries(catalog.axes.map((axis) => [axis.key, new Set()]));
   const expanded = new Set();
   let query = "";
@@ -56,6 +59,7 @@ export function createBrowser(catalog, elements) {
   function update({ focusMore = false } = {}) {
     const { matched, counts } = catalog.filter(query, selection);
     facets.update(counts, selection, expanded);
+    onResults?.(matched);
     renderSummary(elements.count, matched.length, Math.min(shown, matched.length), catalog.total);
     renderList(elements.list, catalog, matched.slice(0, shown));
     elements.more.hidden = matched.length <= shown;

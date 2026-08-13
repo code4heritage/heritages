@@ -32,7 +32,7 @@ async function main() {
   }
   try {
     const payload = await fetchRecords();
-    startBrowsing(payload, datasetLabels(index));
+    await startBrowsing(payload, datasetLabels(index));
   } catch (error) {
     showError("browse-error", error);
   }
@@ -67,19 +67,48 @@ function datasetLabels(index) {
   );
 }
 
-function startBrowsing(payload, labels) {
+async function startBrowsing(payload, labels) {
   const catalog = createCatalog(payload, labels);
   document.getElementById("browse-loading").hidden = true;
+  // 地図は自分の大きさを容れ物から測るので、先に見える状態にしておく。
   document.getElementById("browse").hidden = false;
-  createBrowser(catalog, {
-    search: document.getElementById("search"),
-    reset: document.getElementById("reset"),
-    facets: document.getElementById("facets"),
-    count: document.getElementById("result-count"),
-    list: document.getElementById("results"),
-    more: document.getElementById("more"),
-    empty: document.getElementById("no-results"),
-  });
+  const map = await startMap(catalog);
+  createBrowser(
+    catalog,
+    {
+      search: document.getElementById("search"),
+      reset: document.getElementById("reset"),
+      facets: document.getElementById("facets"),
+      count: document.getElementById("result-count"),
+      list: document.getElementById("results"),
+      more: document.getElementById("more"),
+      empty: document.getElementById("no-results"),
+    },
+    // 絞り込むたびに地図へ渡す。地図が組み立てられなかったときは渡す先が無い。
+    { onResults: (matched) => map?.show(matched) },
+  );
+}
+
+// 地図だけ**動的に読む**。同梱した地図ライブラリ (ADR 0016) は 400 KB を超え、
+// 読めなかったときに一覧まで道連れにしたくない — 地図に位置を持たない行への
+// 配慮も、キーボードだけで使える経路も、一覧が生きていることが前提になる。
+async function startMap(catalog) {
+  try {
+    const { createMapView } = await import("./map.js");
+    return createMapView(catalog, {
+      map: document.getElementById("map"),
+      tiles: document.getElementById("map-tiles"),
+      summary: document.getElementById("map-summary"),
+    });
+  } catch (error) {
+    const failed = document.getElementById("map-error");
+    failed.textContent = `地図を表示できませんでした: ${error.message} (一覧はそのまま使えます)`;
+    failed.hidden = false;
+    // 地図が出ないなら、地図の出典と種類の選択も出す意味が無い。
+    document.getElementById("map-frame").hidden = true;
+    document.getElementById("map-tiles-field").hidden = true;
+    return null;
+  }
 }
 
 function renderSummary({ totals, accessed_dates: accessed, datasets }) {
