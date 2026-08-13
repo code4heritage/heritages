@@ -69,6 +69,10 @@ const POINT_RADIUS = 4.5;
 // 吹き出しの幅の上限。項目名と値が並ぶので、ライブラリの既定 (300) より広く取る。
 const POPUP_MAX_WIDTH = 360;
 
+// 上限は**中身の幅**なので、周りの余白 (leaflet-popup-content の左右 44px と枠) を
+// 引いてから地図に収める。引かないと、狭い画面で吹き出しが地図からはみ出す。
+const POPUP_CHROME = 56;
+
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
 /**
@@ -338,7 +342,9 @@ function showRecord(map, catalog, positions, index) {
 
   // 既定の 300px では項目名と値が 1 語ずつで折り返す。ただし**地図より広くしない**
   // (狭い画面では地図がそのまま吹き出しの上限になる)。高さは CSS で送る。
-  const popup = createPopup({ maxWidth: Math.min(POPUP_MAX_WIDTH, map.getSize().x - 40) });
+  const popup = createPopup({
+    maxWidth: Math.min(POPUP_MAX_WIDTH, map.getSize().x - POPUP_CHROME),
+  });
 
   // **吹き出しの大きさは中身を測って決まる** (Leaflet の `_updateLayout`)。
   // 畳んだ状態で測ったままだと、開いても細いまま伸びる。開閉と読み込みの
