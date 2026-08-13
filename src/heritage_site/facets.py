@@ -23,7 +23,21 @@ from .datasets import Dataset, Row
 # 並べるため、値ごとの西暦の中央値を使う (Issue #32 §2)。
 PERIOD_KEY = "period"
 
+# 所在都道府県だけは件数順にしない (Issue #7)。**都道府県の表は持たない** —
+# コードはデータの側にあり、データリポジトリが `data/13_tokyo.jsonl` のように
+# 地域ごとにファイルを分けている (`Row.path`)。ここが持つのは軸のキーだけで、
+# 47 の呼び名も並びも行から決まる (ADR 0014 / ADR 0015)。
+AREA_KEY = "prefecture"
+
+# 並びの根拠。画面はこれを見て畳み方を決める (地域は途中で切らない)。
+ORDER_COUNT = "count"
+ORDER_PERIOD = "period"
+ORDER_AREA = "area"
+
 _LEADING_YEAR = re.compile(r"\d+")
+
+# データリポジトリのファイル名の頭にある地域コード (`data/13_tokyo.jsonl`)。
+_AREA_CODE = re.compile(r"(\d+)_")
 
 
 @dataclass(frozen=True)
@@ -33,6 +47,7 @@ class Axis:
     key: str
     label: str
     values: tuple[str, ...]
+    order: str = ORDER_COUNT
 
 
 def axis_keys(datasets: list[Dataset]) -> list[str]:
@@ -71,8 +86,14 @@ def build_axes(datasets: list[Dataset], rows: list[Row], keys: list[str]) -> lis
         for position, values in enumerate(row.facets):
             counts[position].update(values)
     medians = _period_medians(rows, keys)
+    codes = _area_codes(rows, keys)
     return [
-        Axis(key=key, label=_label(datasets, key), values=_order(key, counts[position], medians))
+        Axis(
+            key=key,
+            label=_label(datasets, key),
+            values=_order(key, counts[position], medians, codes if key == AREA_KEY else {}),
+            order=_order_kind(key, codes),
+        )
         for position, key in enumerate(keys)
         if counts[position]
     ]
@@ -95,13 +116,54 @@ def _label(datasets: list[Dataset], key: str) -> str:
     return min(labels, key=lambda label: (-labels[label], label))
 
 
-def _order(key: str, counts: Counter[str], medians: dict[str, float]) -> tuple[str, ...]:
-    """値の並び。既定は件数の多い順、時代だけ西暦の中央値順。
+def _order_kind(key: str, codes: dict[str, str]) -> str:
+    if key == AREA_KEY and codes:
+        return ORDER_AREA
+    return ORDER_PERIOD if key == PERIOD_KEY else ORDER_COUNT
+
+
+def _area_codes(rows: list[Row], keys: list[str]) -> dict[str, str]:
+    """所在都道府県の値ごとの地域コード。ファイル名から読む。
+
+    **1 つの値が 2 つのファイルに跨っていたら何も返さない。**この並びは
+    「データリポジトリが地域ごとにファイルを分ける」という別の約束に乗っている
+    ので、約束が変わったら黙ってコード順のつもりの壊れた並びを出すより、
+    件数順へ戻す方がよい (Issue #7)。
+    """
+    if AREA_KEY not in keys:
+        return {}
+    position = keys.index(AREA_KEY)
+    seen: defaultdict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        found = _AREA_CODE.match(row.path.rsplit("/", maxsplit=1)[-1])
+        for value in row.facets[position]:
+            seen[value].add(found.group(1) if found else "")
+    codes = {value: next(iter(found)) for value, found in seen.items() if len(found) == 1}
+    if len(codes) != len(seen) or "" in codes.values():
+        return {}
+    # 1 つのファイルに 2 つの値が入っていれば、コードは値の並びを決められない。
+    if len(set(codes.values())) != len(codes):
+        return {}
+    return codes
+
+
+def _order(
+    key: str, counts: Counter[str], medians: dict[str, float], codes: dict[str, str]
+) -> tuple[str, ...]:
+    """値の並び。既定は件数の多い順、地域はコード順、時代は西暦の中央値順。
+
+    **地域を件数順に並べない** (Issue #7)。件数順だと探したい県の位置が予測できず、
+    しかも件数は更新のたびに動くので、同じ県が先月と違う場所に来る。コードは
+    総務省の都道府県コードで、データリポジトリのファイル名がそれを持っている。
 
     中央値が採れるのは西暦を持つ分類だけ (建造物系の 22 値)。史跡・記念物系の
     「中世」「古代」は西暦を持たないので、年代順の並びの**後ろ**へ件数順で回す。
     混ぜて並べる手はない — 年代の分からない値に位置を与えれば、それは推測になる。
     """
+    if codes:
+        # 桁数を先に見る。コードは 2 桁で揃っているが、揃わなくなっても
+        # `10` が `2` の前に来る並びにはしない。
+        return tuple(sorted(counts, key=lambda value: (len(codes[value]), codes[value])))
     if key != PERIOD_KEY:
         return tuple(sorted(counts, key=lambda value: (-counts[value], value)))
     return tuple(

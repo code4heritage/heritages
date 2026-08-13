@@ -52,6 +52,8 @@ export function createCatalog(payload, datasetLabels = {}) {
     ...payload.axes.map((axis, position) => ({
       key: axis.key,
       label: axis.label,
+      // 並びの根拠 (count / period / area)。畳み方の判断に画面が使う。
+      order: axis.order,
       values: axis.values,
       // 軸によっては 1 行が複数の値を持つ (401 の複合指定など)。
       valuesOf: (record) => record[column.facets][position],

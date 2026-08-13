@@ -201,7 +201,14 @@ def _records_payload(
         "datasets": [dataset.repo for dataset in datasets],
         "search_fields": list(SEARCH_FIELDS),
         "axes": [
-            {"key": axis.key, "label": axis.label, "values": list(axis.values)} for axis in axes
+            # `order` は並びの根拠。画面はこれを見て畳み方を決める (Issue #7)。
+            {
+                "key": axis.key,
+                "label": axis.label,
+                "order": axis.order,
+                "values": list(axis.values),
+            }
+            for axis in axes
         ],
         "fields": [
             "dataset",
