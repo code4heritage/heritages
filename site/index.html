@@ -8,6 +8,8 @@
       name="description"
       content="国指定文化財等データベース (文化庁) の建造物・記念物データを地図と一覧で見る非公式サイト"
     />
+    <!-- 地図ライブラリは同梱したものを配る (ADR 0016)。外へ出るのはタイルだけ。 -->
+    <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
     <link rel="stylesheet" href="./style.css" />
     <script type="module" src="./app.js"></script>
   </head>
@@ -37,6 +39,41 @@
             />
             <button id="reset" type="button">条件を消す</button>
           </form>
+
+          <!--
+            地図は「さがす」の中に置く。別の絞り込みを持たせず、絞った結果を
+            そのまま映すため (Issue #32 §3)。位置を持たない行は地図に出せないので、
+            件数を map-summary に示して一覧へ繋ぐ。
+          -->
+          <div class="map-block">
+            <div class="map-head">
+              <p id="map-summary" class="summary" aria-live="polite"></p>
+              <fieldset id="map-tiles-field" class="map-tiles">
+                <legend>地図の種類</legend>
+                <div id="map-tiles"></div>
+              </fieldset>
+            </div>
+            <p id="map-error" class="error" hidden></p>
+            <div id="map-frame" class="map-frame">
+              <div id="map" class="map"></div>
+              <!--
+                地図の出典は**地図が見えている間ずっと**見えるところに置く
+                (ADR 0016)。折りたたみやトグルの内側に入れない。地図ライブラリが
+                作る表示に預けないのは、静的な検査 (tests/test_notices.py) から
+                見えなくなるため。
+              -->
+              <p class="map-credit notice" data-notice="map">
+                地図の出典:
+                <a
+                  href="https://maps.gsi.go.jp/development/ichiran.html"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  >地理院タイル</a
+                >
+                (国土地理院)
+              </p>
+            </div>
+          </div>
 
           <div class="browse-body">
             <!--
