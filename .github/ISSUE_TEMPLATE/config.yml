@@ -1,0 +1,7 @@
+# GitHub のアカウントが無い人にも窓口を出す (Issue #6)。
+# アドレスは難読化せずそのまま書く — 届かなければ窓口の意味が無い。
+blank_issues_enabled: true
+contact_links:
+  - name: GitHub のアカウントが無いとき (メール)
+    url: mailto:c4h-support@googlegroups.com
+    about: 誤りや不具合をメールで知らせる。原本ページの URL を添えてください。

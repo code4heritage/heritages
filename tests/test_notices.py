@@ -1,7 +1,10 @@
-"""出典・地図・非公式・ライセンスの表記が消えていないことの機械検査。
+"""出典・地図・非公式・ライセンス・報告先の表記が消えていないことの機械検査。
 
-4 つは目的の違う表示で、混ぜると役目を果たさない (ADR 0007 / ADR 0016)。
+5 つは目的の違う表示で、混ぜると役目を果たさない (ADR 0007 / ADR 0016 / Issue #6)。
 人手のレビューでは、無関係なリファクタで静かに消えたときに気付けない。
+
+ここで見るのは**在ることと畳まれていないこと**まで。報告先の中身は
+`tests/test_feedback.py`。
 """
 
 from __future__ import annotations
@@ -11,44 +14,15 @@ from pathlib import Path
 
 import pytest
 
+from conftest import notice_texts
+
 SITE_DIR = Path(__file__).resolve().parents[1] / "site"
 INDEX_HTML = SITE_DIR / "index.html"
 
-REQUIRED_NOTICES = ("source", "map", "unofficial", "license")
+REQUIRED_NOTICES = ("source", "map", "unofficial", "license", "feedback")
 
 # 地理院タイルの利用は、出典の明示と一覧ページへのリンクが条件 (ADR 0016)。
 GSI_TILE_LIST_URL = "https://maps.gsi.go.jp/development/ichiran.html"
-
-
-class _NoticeExtractor(HTMLParser):
-    """`data-notice` を持つ要素の中身を取り出す。"""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.notices: dict[str, str] = {}
-        self._current: str | None = None
-        self._depth = 0
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        notice = dict(attrs).get("data-notice")
-        if self._current is None and notice:
-            self._current = notice
-            self._depth = 0
-            self.notices.setdefault(notice, "")
-        elif self._current is not None:
-            self._depth += 1
-
-    def handle_endtag(self, tag: str) -> None:
-        if self._current is None:
-            return
-        if self._depth == 0:
-            self._current = None
-        else:
-            self._depth -= 1
-
-    def handle_data(self, data: str) -> None:
-        if self._current is not None:
-            self.notices[self._current] += data
 
 
 class _AncestorTracker(HTMLParser):
@@ -79,12 +53,6 @@ def _ancestors() -> dict[str, tuple[str, ...]]:
     return parser.ancestors
 
 
-def _notices() -> dict[str, str]:
-    parser = _NoticeExtractor()
-    parser.feed(INDEX_HTML.read_text(encoding="utf-8"))
-    return {key: " ".join(value.split()) for key, value in parser.notices.items()}
-
-
 def _site_sources() -> dict[Path, str]:
     return {
         path: path.read_text(encoding="utf-8")
@@ -95,12 +63,12 @@ def _site_sources() -> dict[Path, str]:
 
 @pytest.mark.parametrize("notice", REQUIRED_NOTICES)
 def test_the_notice_is_present(notice: str) -> None:
-    assert notice in _notices()
+    assert notice in notice_texts()
 
 
 def test_the_map_notice_credits_the_tiles() -> None:
     """地理院タイルは、出典の明示と一覧ページへのリンクが利用の条件 (ADR 0016)。"""
-    text = _notices()["map"]
+    text = notice_texts()["map"]
     assert "地理院タイル" in text
     assert "国土地理院" in text
     assert GSI_TILE_LIST_URL in INDEX_HTML.read_text(encoding="utf-8")
@@ -111,7 +79,7 @@ def test_the_notice_is_not_folded_away(notice: str) -> None:
     """折りたたみの内側に入れない。
 
     地図の出典は「測量成果が画面に表示されている間は常に見える」ことを求められる
-    (ADR 0016)。他の 3 つも、畳めば無いのと変わらない。
+    (ADR 0016)。他の 4 つも、畳めば無いのと変わらない。
     """
     assert "details" not in _ancestors()[notice]
 
@@ -128,13 +96,13 @@ def test_the_map_credit_does_not_depend_on_the_library() -> None:
 
 def test_the_unofficial_notice_denies_being_official() -> None:
     """「国が作成したかのような態様」の回避 (ADR 0007)。"""
-    text = _notices()["unofficial"]
+    text = notice_texts()["unofficial"]
     assert "非公式" in text
     assert "文化庁" in text
 
 
 def test_the_license_notice_separates_code_from_data() -> None:
-    text = _notices()["license"]
+    text = notice_texts()["license"]
     assert "MIT" in text
     assert "利用規約" in text
 
