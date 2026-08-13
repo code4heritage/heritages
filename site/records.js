@@ -48,7 +48,7 @@ export function createCatalog(payload, datasets = [], { source = createRecordSou
       { name: meta?.dataset?.name ?? repo, path, labels: meta?.labels ?? {} },
     ]),
   );
-  // 複合指定 (同じ棟が複数の種別に現れる) の相手。**開かれるまで作らない** —
+  // 複合指定 (同じ棟が複数の種別に現れる) の相手。**要るまで作らない** —
   // 2 万行を数える手間を、詳細を 1 件も開かない読み手に払わせない。
   let shared = null;
 
@@ -105,8 +105,7 @@ export function createCatalog(payload, datasets = [], { source = createRecordSou
     axes,
     total: records.length,
     coordinates: coordinatesOf(records, column),
-    record: (index) =>
-      describe(records[index], column, payload.datasets, info, siblingsOf(records[index])),
+    record: (index) => describe(records[index], column, payload.datasets, info, siblingsOf),
     // 元の行を読んで、並べられる形の項目にして返す。**開かれたときだけ呼ぶ**。
     detail: async (index) => {
       const record = records[index];
@@ -131,12 +130,15 @@ function coordinatesOf(records, column) {
   };
 }
 
-function describe(record, column, repos, info, siblings) {
+function describe(record, column, repos, info, siblingsOf) {
   const repo = repos[record[column.dataset]];
   return {
     dataset: info.get(repo)?.name ?? repo,
     // 同じ棟が現れる他の種別 (ADR 0012)。種別ごとのサイトでは表せなかったもの。
-    siblings,
+    // **読まれたときに数える** — 一覧に 200 件並べるたびに 2 万行を数えない。
+    get siblings() {
+      return siblingsOf(record);
+    },
     ledgerId: record[column.ledger_id],
     managedId: record[column.managed_id],
     name: record[column.name],
