@@ -1,4 +1,4 @@
-"""テスト用のデータリポジトリを組み立てる道具。
+"""テスト用のデータリポジトリを組み立てる道具と、画面の表記を読む道具。
 
 `meta.json` の件数は既定で行から数えて埋める。件数の不一致を試すテストは
 `counts` を明示して壊す — 「正しい状態を作るのが面倒だから検査が緩い」を避ける。
@@ -9,12 +9,56 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 DEFAULT_ACCESSED_DATE = "2026-08-12"
+
+INDEX_HTML = Path(__file__).resolve().parents[1] / "site" / "index.html"
+
+
+class _NoticeExtractor(HTMLParser):
+    """`data-notice` を持つ要素の中身を取り出す。"""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.notices: dict[str, str] = {}
+        self._current: str | None = None
+        self._depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        notice = dict(attrs).get("data-notice")
+        if self._current is None and notice:
+            self._current = notice
+            self._depth = 0
+            self.notices.setdefault(notice, "")
+        elif self._current is not None:
+            self._depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._current is None:
+            return
+        if self._depth == 0:
+            self._current = None
+        else:
+            self._depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._current is not None:
+            self.notices[self._current] += data
+
+
+def notice_texts() -> dict[str, str]:
+    """画面の表記を `data-notice` ごとに引けるようにする (空白は潰す)。
+
+    表記が在るかどうかは `tests/test_notices.py`、中身は表記ごとの検査が見る。
+    """
+    parser = _NoticeExtractor()
+    parser.feed(INDEX_HTML.read_text(encoding="utf-8"))
+    return {key: " ".join(value.split()) for key, value in parser.notices.items()}
 
 
 def record(
