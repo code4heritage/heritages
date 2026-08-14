@@ -1,0 +1,254 @@
+name: 配布物のリリース
+
+# データを ZIP でまとめ、11 箇所のリリースへ置く (Issue #16)。種別横断の全部入りは
+# このリポジトリへ、種別ごとのぶんは各データリポジトリへ。
+#
+# **Pages とはワークフローごと分けてある。** 配信 (pages.yml) と配布は別の仕事で、
+# 片方の失敗でもう片方を止める理由が無い。
+#
+# **差分のある種別だけリリースを作る。** 月次の差分更新では `meta.json` の利用日
+# だけが動く月がある (ADR 0018)。ここが見ているのは行の中身なので、その月は
+# `has_changes` が偽になり、どこにもリリースが立たない。
+#
+# 必要な secret は 2 つ。**クローラーの月次更新と同じ GitHub App** (code4heritage
+# org に作り、対象 10 リポジトリにだけ contents:write を与えたもの)。
+#
+# - DATA_PUSH_CLIENT_ID   … App の Client ID
+# - DATA_PUSH_PRIVATE_KEY … App の秘密鍵 (PEM のまま)
+#
+# このリポジトリ自身のリリースは GITHUB_TOKEN で作れる (App は要らない)。
+
+on:
+  schedule:
+    # 毎月 3 日 07:30 JST。月次の差分更新 (毎月 2 日 03:00 JST) が終わり、
+    # Pages の反映 (07:00 JST) が済んだ後に走らせる。
+    - cron: "30 22 2 * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 差分だけ見る (リリースを作らない)
+        type: boolean
+        default: false
+
+# 同時に走らせない。同じタグを 2 つの実行が作りにいくのを避ける。走っている回は
+# 途中で止めない — 11 箇所のうち一部だけリリースが立った状態で終わらせないため。
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write # このリポジトリのリリース
+  issues: write # 失敗を残す
+
+env:
+  DATA_DIR: data-repos
+  OUT_DIR: dist
+  ARCHIVE: heritages-jsonl.zip
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: ビルドを導入
+        run: pip install -e .
+
+      # 秘密が無いまま進むと、全部入りだけリリースされて 10 個が揃わない状態で
+      # 終わる。**相手先へ出る前に**確かめて、不揃いを作らない。
+      - name: データリポジトリ用の資格情報があるか確かめる
+        if: inputs.dry-run != true
+        env:
+          CLIENT_ID: ${{ secrets.DATA_PUSH_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.DATA_PUSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLIENT_ID" ] || [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::DATA_PUSH_CLIENT_ID / DATA_PUSH_PRIVATE_KEY が無い。" \
+              "クローラーの月次更新と同じ GitHub App の値を登録する"
+            exit 1
+          fi
+
+      # データリポジトリは public なので github.token で読める (ADR 0015)。
+      # 取得元の commit は sources.txt に残り、目録 (MANIFEST.json) に載る。
+      - name: データリポジトリを取得
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-datasets.sh "$DATA_DIR"
+
+      # **配信を止める不変条件は、そのまま「配ってよいか」の判定になる。**
+      # 壊れたデータを固めて配ると、あとから取り消せない。
+      - name: 配ってよいデータか確かめる
+        run: heritage-site build --data-dir "$DATA_DIR" --check-only
+
+      - name: 配布物を固める
+        run: |
+          set -euo pipefail
+          {
+            echo '## 配布物'
+            echo '```'
+            heritage-site pack --data-dir "$DATA_DIR" --out-dir "$OUT_DIR"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # 前回の配布物が差分の基準。**種別ごとに取りに行かない** — 全部入り 1 つに
+      # 全種別が入っているので、これだけで 11 箇所ぶんの差分が出る。
+      - name: 前回の配布物を取る
+        id: previous
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release download --pattern "$ARCHIVE" --dir previous 2>/dev/null; then
+            echo "before=previous/${ARCHIVE}" >>"$GITHUB_OUTPUT"
+            echo "前回の配布物と突き合わせる"
+          else
+            echo "初回 (前回のリリースが無いので、全件を基準にする)"
+          fi
+
+      - name: 何が変わったかを出す
+        env:
+          BEFORE: ${{ steps.previous.outputs.before }}
+        run: |
+          set -euo pipefail
+          args=(--data-dir "$DATA_DIR" --out "$OUT_DIR")
+          if [ -n "${BEFORE:-}" ]; then args+=(--before "$BEFORE"); fi
+          {
+            echo '## 差分'
+            echo '```'
+            heritage-site diff "${args[@]}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: リリースを作るか決める
+        id: plan
+        run: |
+          set -euo pipefail
+          changed=$(jq -r '.has_changes' "${OUT_DIR}/changes.json")
+          # 月は日本時間で切る。UTC のままだと月初の実行で 1 日ずれる。
+          tag="data-$(TZ=Asia/Tokyo date +%Y-%m-%d)"
+          echo "tag=${tag}" >>"$GITHUB_OUTPUT"
+          echo "changed=${changed}" >>"$GITHUB_OUTPUT"
+          if [ "$changed" != "true" ]; then
+            echo "データは前回のリリースから変わっていない。リリースは作らない。" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: 照合値を作る
+        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        run: |
+          set -euo pipefail
+          cd "$OUT_DIR"
+          # checksums.txt 自身は含めない (自分のハッシュは書けない)。
+          sha256sum ./*.zip changes.md changes.json >checksums.txt
+
+      # このリポジトリのリリースは GITHUB_TOKEN で作れる。同じタグが既にあるときは
+      # 作り直さない (同じ日に 2 回走ったとき、リリースを二重に立てない)。
+      - name: 全部入りをリリースする
+        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::warning::${TAG} は既にある。全部入りは作り直さない"
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file "${OUT_DIR}/notes.md" \
+            "${OUT_DIR}/${ARCHIVE}" \
+            "${OUT_DIR}/changes.md" \
+            "${OUT_DIR}/changes.json" \
+            "${OUT_DIR}/checksums.txt"
+          echo "- ${{ github.repository }}: ${TAG}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: データリポジトリ用のトークンを発行
+        id: token
+        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.DATA_PUSH_CLIENT_ID }}
+          private-key: ${{ secrets.DATA_PUSH_PRIVATE_KEY }}
+          # リポジトリ名を並べない。App のインストール先を 10 リポジトリに絞る
+          # ことで範囲を限る (クローラーの月次更新と同じ考え方)。
+          owner: code4heritage
+          permission-contents: write
+
+      # 対象は sources.txt が持っている (取得したリポジトリそのもの)。**ここにも
+      # リポジトリ名の表を書かない** — 種別が増えても減っても、ここは変わらない。
+      - name: 種別ごとにリリースする
+        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          created=0
+          {
+            echo '## 種別ごとのリリース'
+            while read -r repo _; do
+              [ -n "$repo" ] || continue
+              changed=$(jq -r --arg repo "$repo" \
+                '.datasets[] | select(.repo == $repo) | .has_changes' \
+                "${OUT_DIR}/changes.json")
+              if [ "$changed" != "true" ]; then
+                echo "- ${repo}: 変更なし (リリースは作らない)"
+                continue
+              fi
+              if gh release view "$TAG" --repo "code4heritage/${repo}" >/dev/null 2>&1; then
+                echo "- ${repo}: ${TAG} は既にある (作り直さない)"
+                continue
+              fi
+              gh release create "$TAG" --repo "code4heritage/${repo}" \
+                --title "$TAG" \
+                --notes-file "${OUT_DIR}/datasets/${repo}/notes.md" \
+                "${OUT_DIR}/${repo}-jsonl.zip" \
+                "${OUT_DIR}/datasets/${repo}/changes.md"
+              echo "- ${repo}: ${TAG}"
+              created=$((created + 1))
+            done <"${DATA_DIR}/sources.txt"
+            echo
+            echo "リリースを作った種別: ${created}"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # 月次は誰も見ていないところで走る。失敗を Issue に残さないと、配布が
+      # 何か月も止まっていることに気付けない (pages.yml 以外の定期実行と同じ形)。
+      - name: 失敗を Issue に残す
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          title="配布物のリリースが失敗した"
+          {
+            echo "配布物のリリース (\`.github/workflows/release.yml\`) が失敗した。"
+            echo "**データそのものは各データリポジトリにあり、サイトの配信も止まっていない。**"
+            echo "止まっているのは ZIP での配布だけ。"
+            echo
+            echo "実行: ${RUN_URL}"
+            echo
+            echo "手元で追うときは (データリポジトリを並べた親を指す):"
+            echo
+            echo '```'
+            echo "heritage-site pack --data-dir <親> --out-dir dist"
+            echo "heritage-site diff --data-dir <親> --before <前回の ZIP> --out dist"
+            echo '```'
+          } >body.md
+
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"${title}\")] | .[0].number // empty")
+
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi

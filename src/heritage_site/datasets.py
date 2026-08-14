@@ -101,6 +101,35 @@ class Row:
         return self.latitude is not None and self.longitude is not None
 
 
+@dataclass(frozen=True)
+class Record:
+    """JSON Lines の 1 行を、項目を落とさずに持ったもの。
+
+    索引を作るだけなら `Row` で足りるが、**配布物の差分は全項目を比べる**ので
+    (`changes.py`)、解説文のような重い項目まで要る。2 万行を丸ごと抱えることに
+    なるので、索引の側 (`Row`) と分けてある。
+    """
+
+    dataset: str
+    path: str
+    line: int
+    values: dict[str, Any]
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        """配布物の中で 1 行を一意に決める組。
+
+        **データセットを含めるのが要。** 同じ棟が複数の種別に現れる複合指定が
+        あるので (ADR 0012)、`(台帳ID, 管理対象ID)` だけでは種別をまたいだ移動を
+        「変更なし」と読んでしまう。
+        """
+        return (
+            self.dataset,
+            _text(self.values.get("ledger_id")),
+            _text(self.values.get("managed_id")),
+        )
+
+
 def discover(data_dir: Path) -> list[Dataset]:
     """`data_dir` 直下から `meta.json` を持つディレクトリを集める。
 
@@ -139,19 +168,18 @@ def iter_rows(
     `facet_keys` に渡した軸の値だけを行から拾う。**どの軸があるかは
     `meta.json` が決める**ので (`facets.axis_keys`)、ここでは名前を知らない。
     """
-    for path in data_files(dataset):
-        relative = f"{DATA_DIRNAME}/{path.name}"
-        with path.open(encoding="utf-8") as stream:
-            for line_number, raw in enumerate(stream, start=1):
-                if not raw.strip():
-                    continue
-                try:
-                    record = json.loads(raw)
-                except json.JSONDecodeError as error:
-                    raise DataError(
-                        f"JSON として読めない: {dataset.repo}/{relative}:{line_number} ({error})"
-                    ) from error
-                yield _row(record, dataset_index, relative, line_number, facet_keys)
+    for relative, line_number, record in _iter_lines(dataset):
+        yield _row(record, dataset_index, relative, line_number, facet_keys)
+
+
+def iter_records(dataset: Dataset) -> Iterator[Record]:
+    """データセットの全行を、**項目を落とさずに**読む。
+
+    `Row` が索引に要るぶんだけを持つのに対し、こちらは行を丸ごと持つ。
+    配布物の差分は全項目を比べるので (`changes.py`)、解説文まで要る。
+    """
+    for relative, line_number, record in _iter_lines(dataset):
+        yield Record(dataset=dataset.repo, path=relative, line=line_number, values=record)
 
 
 def location(datasets: list[Dataset], row: Row) -> str:
@@ -169,15 +197,37 @@ def _read_meta(path: Path) -> dict[str, Any]:
     return meta
 
 
+def _iter_lines(dataset: Dataset) -> Iterator[tuple[str, int, dict[str, Any]]]:
+    """全ファイルを名前順・行順に読み、1 行ずつ出どころと一緒に返す。
+
+    索引 (`iter_rows`) と差分 (`iter_records`) で読み方を分けない。**行の位置を
+    どう数えるか・壊れた行をどう報せるかが 2 箇所に散ると、報告の位置がずれる。**
+    """
+    for path in data_files(dataset):
+        relative = f"{DATA_DIRNAME}/{path.name}"
+        where = f"{dataset.repo}/{relative}"
+        with path.open(encoding="utf-8") as stream:
+            for line_number, raw in enumerate(stream, start=1):
+                if not raw.strip():
+                    continue
+                try:
+                    record = json.loads(raw)
+                except json.JSONDecodeError as error:
+                    raise DataError(
+                        f"JSON として読めない: {where}:{line_number} ({error})"
+                    ) from error
+                if not isinstance(record, dict):
+                    raise DataError(f"行がオブジェクトでない: {where}:{line_number}")
+                yield relative, line_number, record
+
+
 def _row(
-    record: Any,
+    record: dict[str, Any],
     dataset_index: int,
     relative: str,
     line_number: int,
     facet_keys: Sequence[str],
 ) -> Row:
-    if not isinstance(record, dict):
-        raise DataError(f"行がオブジェクトでない: {relative}:{line_number}")
     latitude = _coordinate(record.get("latitude"))
     longitude = _coordinate(record.get("longitude"))
     # 片方だけの座標は地図に置けない。両方揃っていなければ「座標なし」として扱う。
