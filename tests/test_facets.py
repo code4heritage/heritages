@@ -190,6 +190,112 @@ def test_periods_without_a_western_year_come_after_the_dated_ones(tmp_path: Path
     assert _axes(data_dir)[0].values == ("明治", "中世", "古代")
 
 
+def _by_criteria(data_dir: Path, values: dict[str, int], **extra: Any) -> list[Axis]:
+    """指定基準の値と件数だけを持つデータセット (体系は 1 つ = まとめない)。"""
+    rows = [
+        record("401", f"{number}-{repeat}", criteria=value, **extra)
+        for number, (value, count) in enumerate(values.items())
+        for repeat in range(count)
+    ]
+    _dataset(data_dir, "a", rows, facets={"criteria": values})
+    return _axes(data_dir)
+
+
+def test_criteria_are_ordered_by_the_number_written_in_the_value(tmp_path: Path) -> None:
+    """指定基準は原文が番号で並んでいる。**件数順にすると原文の並びが崩れる。**
+
+    番号は値そのものが持っているので、基準の表をサイトに持たずに戻せる。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_criteria(
+        data_dir,
+        # 件数順なら 三 → 二 → 一 になる並び。
+        {"一．公園、庭園": 1, "二．橋梁、築堤": 2, "三．花樹、花草": 3},
+    )
+    assert axes[0].values == ("一．公園、庭園", "二．橋梁、築堤", "三．花樹、花草")
+    assert axes[0].order == "number"
+
+
+def test_a_number_past_ten_is_read_as_a_number(tmp_path: Path) -> None:
+    """`十一．` は `二．` の後ではなく `十．` の後。文字として並べない。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_criteria(
+        data_dir,
+        {"十一．展望地点": 3, "二．橋梁、築堤": 2, "十．山岳、丘陵": 1},
+    )
+    assert axes[0].values == ("二．橋梁、築堤", "十．山岳、丘陵", "十一．展望地点")
+
+
+def test_a_number_in_brackets_is_read_too(tmp_path: Path) -> None:
+    """括弧書きの番号もある。**開きだけ半角**のものも読む (102 の重文指定基準)。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_criteria(
+        data_dir,
+        {"（三）自然環境における特有の動物": 3, "(一）意匠的に優秀なもの": 1, "（二）洞穴": 2},
+    )
+    assert axes[0].values == (
+        "(一）意匠的に優秀なもの",
+        "（二）洞穴",
+        "（三）自然環境における特有の動物",
+    )
+
+
+def test_values_without_a_number_come_after_the_numbered_ones(tmp_path: Path) -> None:
+    """番号を持たない基準もある (登録有形の登録基準・国宝の重文指定基準)。
+
+    番号順の中へ推測で混ぜない。西暦を持たない時代と同じく後ろへ件数順で回す。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_criteria(
+        data_dir,
+        {
+            "保護すべき天然記念物に富んだ代表的一定の区域": 9,
+            "（二）洞穴": 2,
+            "（一）名木、巨樹": 1,
+        },
+    )
+    assert axes[0].values == (
+        "（一）名木、巨樹",
+        "（二）洞穴",
+        "保護すべき天然記念物に富んだ代表的一定の区域",
+    )
+
+
+def test_values_sharing_a_number_stay_in_count_order(tmp_path: Path) -> None:
+    """天然記念物の `（一）` は動物・植物・地質鉱物に 1 つずつある。
+
+    番号で決まるのはそこまでで、同じ番号どうしは既定の件数順。
+    """
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    axes = _by_criteria(
+        data_dir,
+        {"（一）名木、巨樹": 1, "（一）岩石、鉱物": 3, "（二）洞穴": 2},
+    )
+    assert axes[0].values == ("（一）岩石、鉱物", "（一）名木、巨樹", "（二）洞穴")
+
+
+def test_an_axis_where_a_number_is_the_exception_stays_in_count_order(tmp_path: Path) -> None:
+    """番号らしき値がたまたま混ざった軸を巻き込まない。過半で決める。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    _dataset(
+        data_dir,
+        "a",
+        [record("401", "1", types="三．番号のような種別")]
+        + [record("401", f"2{n}", types="城跡") for n in range(2)]
+        + [record("401", f"3{n}", types="墳墓") for n in range(3)],
+        facets={"types": {"三．番号のような種別": 1, "城跡": 2, "墳墓": 3}},
+    )
+    axes = _axes(data_dir)
+    assert axes[0].order == "count"
+    assert axes[0].values == ("墳墓", "城跡", "三．番号のような種別")
+
+
 def test_the_label_follows_the_datasets_that_declare_it(tmp_path: Path) -> None:
     """同じ軸を分類ごとに違う名前で呼ぶ (指定基準 / 重文指定基準)。"""
     data_dir = tmp_path / "data-repos"
