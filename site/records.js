@@ -14,7 +14,7 @@ import { normalize } from "./normalize.js";
 const RECORDS_URL = "./records.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
-const SUPPORTED_SCHEMA_VERSION = 3;
+const SUPPORTED_SCHEMA_VERSION = 4;
 
 // データセット (種別) は絞り込みの主軸だが、meta.json の facets には出てこない。
 // 種別横断のサイトなので、ここだけは索引の datasets から軸を作る。

@@ -48,8 +48,10 @@ from .search import SEARCH_FIELDS
 # 2 で行の出どころ (`files` / `file` / `line`) が入った — 詳細ビューが JSON Lines を
 # その場で読むための道しるべ (Issue #32 §4)。3 で軸に体系のまとまり (`groups`) が
 # 入った — 体系ごとに別の語彙が 1 本の軸に混ざる軸を、画面が畳んでまとめるため
-# (Issue #8)。
-SITE_SCHEMA_VERSION = 3
+# (Issue #8)。4 で最終確認日 (`checked_date`) が入った — 利用日が「データを取得した
+# 日」になり、変更が無い週は動かなくなったので、**確認していること自体を示す日付が
+# 別に要る**ようになった。
+SITE_SCHEMA_VERSION = 4
 
 DATASETS_DIRNAME = "datasets"
 INDEX_FILENAME = "index.json"
@@ -87,6 +89,7 @@ def build(
     *,
     site_dir: Path,
     today: date | None = None,
+    checked_date: str = "",
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
     max_missing_coordinate_ratio: float = DEFAULT_MAX_MISSING_COORDINATE_RATIO,
     write: bool = True,
@@ -110,6 +113,7 @@ def build(
         datasets,
         rows,
         today=today or today_in_japan(),
+        checked_date=checked_date,
         max_age_days=max_age_days,
         max_missing_coordinate_ratio=max_missing_coordinate_ratio,
     )
@@ -119,7 +123,9 @@ def build(
 
     axes = build_axes(datasets, rows, keys)
     _prepare(out_dir)
-    _write_json(out_dir / INDEX_FILENAME, _index_payload(datasets, report), indent=2)
+    _write_json(
+        out_dir / INDEX_FILENAME, _index_payload(datasets, report, checked_date), indent=2
+    )
     _write_json(
         out_dir / RECORDS_FILENAME, _records_payload(datasets, rows, keys, axes), indent=None
     )
@@ -151,17 +157,24 @@ def _mappable(row: Row) -> bool:
     )
 
 
-def _index_payload(datasets: list[Dataset], report: BuildReport) -> dict[str, Any]:
+def _index_payload(
+    datasets: list[Dataset], report: BuildReport, checked_date: str
+) -> dict[str, Any]:
     """`meta.json` を**そのまま**束ねる。
 
     サイト側で読み替えないので、データリポジトリが持つ語彙・ラベル・件数が
     そのまま画面に出る。種別が増えてもここは変わらない (ADR 0015)。
+
+    `checked_date` だけは `meta.json` に無い — **データベースを見にいった日**は
+    クローラーしか知らず、変更が無ければデータには痕跡が残らないため、組み立てる
+    ときに外から渡す。空なら項目ごと出さない (「不明」を表示しない)。
     """
     accessed = sorted(
         str(dataset.accessed_date) for dataset in datasets if dataset.accessed_date
     )
     return {
         "schema_version": SITE_SCHEMA_VERSION,
+        **({"checked_date": checked_date} if checked_date else {}),
         "totals": {
             "records": report.rows,
             "distinct": report.distinct,

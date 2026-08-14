@@ -15,7 +15,7 @@ const INDEX_URL = "./index.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
 // 食い違ったまま描くと画面のどこかが黙って空になるので、先に止める。
-const SUPPORTED_SCHEMA_VERSION = 3;
+const SUPPORTED_SCHEMA_VERSION = 4;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
@@ -105,7 +105,7 @@ async function startMap(catalog) {
   }
 }
 
-function renderSummary({ totals, accessed_dates: accessed, datasets }) {
+function renderSummary({ totals, accessed_dates: accessed, checked_date: checked, datasets }) {
   const parts = [
     `${datasets.length} 種別 / ${NUMBER_FORMAT.format(totals.records)} 行`,
     `異なり ${NUMBER_FORMAT.format(totals.distinct)} 件`,
@@ -115,6 +115,11 @@ function renderSummary({ totals, accessed_dates: accessed, datasets }) {
     parts.push(`うち ${NUMBER_FORMAT.format(totals.shared)} 件は複数の種別に現れます`);
   }
   parts.push(`利用日 ${formatAccessed(accessed)}`);
+  // **利用日と別物。** データが変わらなければ利用日は動かないので、確認を続けて
+  // いることはこちらでしか分からない。索引に無ければ出さない (「不明」と書かない)。
+  if (checked) {
+    parts.push(`最終確認 ${checked}`);
+  }
   document.getElementById("summary").textContent = parts.join(" / ");
 }
 

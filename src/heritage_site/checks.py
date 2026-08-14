@@ -62,13 +62,16 @@ def run(
     rows: list[Row],
     *,
     today: date,
+    checked_date: str = "",
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
     max_missing_coordinate_ratio: float = DEFAULT_MAX_MISSING_COORDINATE_RATIO,
     min_missing_coordinates: int = DEFAULT_MIN_MISSING_COORDINATES,
 ) -> list[Finding]:
     findings: list[Finding] = []
     findings += _check_schema_version(datasets)
-    findings += _check_accessed_date(datasets, today=today, max_age_days=max_age_days)
+    findings += _check_accessed_date(
+        datasets, today=today, max_age_days=max_age_days, checked_date=checked_date
+    )
     findings += _check_files(datasets)
     findings += _check_counts(datasets, rows)
     findings += _check_required_fields(datasets, rows)
@@ -107,8 +110,21 @@ def _check_schema_version(datasets: list[Dataset]) -> list[Finding]:
 
 
 def _check_accessed_date(
-    datasets: list[Dataset], *, today: date, max_age_days: int
+    datasets: list[Dataset], *, today: date, max_age_days: int, checked_date: str
 ) -> list[Finding]:
+    """更新の仕組みが止まっていないかを見る。
+
+    **見る日付は 2 つあり、意味が違う。**
+
+    - 利用日 (`accessed_date`) … そのデータを取り出した日。上流が長く変わらなければ
+      古いままになるが、それは正常
+    - 確認日 (`checked_date`) … データベースを見にいった最後の日。クローラーが
+      渡してくる
+
+    だから**確認日が分かるときは、そちらで判定する**。確認日が渡されないとき
+    (手元での組み立てなど) だけ、利用日の古さを安全網として使う — どちらも見ないと、
+    仕組みが止まったことに誰も気付けない。
+    """
     findings: list[Finding] = []
     unreadable: list[str] = []
     stale: list[str] = []
@@ -118,6 +134,9 @@ def _check_accessed_date(
             accessed = date.fromisoformat(value)
         except (TypeError, ValueError):
             unreadable.append(f"{dataset.repo}: accessed_date={value!r}")
+            continue
+        # 確認日が分かるなら、利用日の古さは判定に使わない (古いのが正常なため)。
+        if checked_date:
             continue
         age = (today - accessed).days
         if age > max_age_days:
@@ -137,11 +156,37 @@ def _check_accessed_date(
                 "accessed_date",
                 "error",
                 f"利用日が {max_age_days} 日より古いデータセットが {len(stale)} 件"
-                " — 月次の差分更新が止まっている疑い",
+                " — 差分更新が止まっている疑い",
                 tuple(stale[:_MAX_EXAMPLES]),
             )
         )
+    findings += _check_checked_date(today=today, max_age_days=max_age_days, value=checked_date)
     return findings
+
+
+def _check_checked_date(*, today: date, max_age_days: int, value: str) -> list[Finding]:
+    """確認日そのものが古くないか。
+
+    ここが古いのは**データが変わっていない**のではなく、**確かめに行けていない**
+    という意味なので、配信を止める。
+    """
+    if not value:
+        return []
+    try:
+        checked = date.fromisoformat(value)
+    except (TypeError, ValueError):
+        return [Finding("checked_date", "error", f"確認日を日付として読めない: {value!r}")]
+    age = (today - checked).days
+    if age <= max_age_days:
+        return []
+    return [
+        Finding(
+            "checked_date",
+            "error",
+            f"確認日が {max_age_days} 日より古い ({checked.isoformat()}・{age} 日前)"
+            " — 週次の更新が止まっている疑い",
+        )
+    ]
 
 
 def _check_files(datasets: list[Dataset]) -> list[Finding]:
