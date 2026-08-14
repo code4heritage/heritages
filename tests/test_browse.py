@@ -337,7 +337,7 @@ def test_the_other_axes_are_still_cut_at_ten(node: str) -> None:
         node,
         [
             {"axis": {"key": "period", "order": "period"}, "expanded": False},
-            {"axis": {"key": "criteria", "order": "count"}, "expanded": False},
+            {"axis": {"key": "criteria", "order": "number"}, "expanded": False},
         ],
     )
     assert limits == [10, 10]

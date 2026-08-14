@@ -33,11 +33,19 @@ AREA_KEY = "prefecture"
 ORDER_COUNT = "count"
 ORDER_PERIOD = "period"
 ORDER_AREA = "area"
+ORDER_NUMBER = "number"
 
 _LEADING_YEAR = re.compile(r"\d+")
 
 # データリポジトリのファイル名の頭にある地域コード (`data/13_tokyo.jsonl`)。
 _AREA_CODE = re.compile(r"(\d+)_")
+
+# 値の頭に振られた番号 (`一．貝塚、集落跡…` / `（一）名木、巨樹…`)。**括弧は
+# 開きだけ半角のことがある** (`(三）歴史的価値の高いもの`。102 の重文指定基準)。
+# 区切りの記号まで含めて読むのは、`三重県庁舎` のような値を番号と見ないため。
+_LEADING_NUMBER = re.compile(r"^[（(]?([一二三四五六七八九十]+)[）)．.]")
+
+_KANJI_DIGITS = {character: number for number, character in enumerate("一二三四五六七八九", 1)}
 
 
 @dataclass(frozen=True)
@@ -107,14 +115,17 @@ def build_axes(datasets: list[Dataset], rows: list[Row], keys: list[str]) -> lis
     for position, key in enumerate(keys):
         if not counts[position]:
             continue
-        values = _order(key, counts[position], medians, codes if key == AREA_KEY else {})
+        area = codes if key == AREA_KEY else {}
+        # 地域と時代は先に並びが決まっている。番号は残りの軸だけで探す。
+        numbers = {} if area or key == PERIOD_KEY else _numbers(counts[position])
+        values = _order(key, counts[position], medians, area, numbers)
         schemes = _schemes(datasets, rows, position, values, composite)
         axes.append(
             Axis(
                 key=key,
                 label=_label(datasets, key),
                 values=tuple(value for _, members in schemes for value in members) or values,
-                order=_order_kind(key, codes),
+                order=_order_kind(key, area, numbers),
                 groups=tuple(Group(label, len(members)) for label, members in schemes),
             )
         )
@@ -207,10 +218,51 @@ def _label(datasets: list[Dataset], key: str) -> str:
     return min(labels, key=lambda label: (-labels[label], label))
 
 
-def _order_kind(key: str, codes: dict[str, str]) -> str:
+def _order_kind(key: str, codes: dict[str, str], numbers: dict[str, int]) -> str:
     if key == AREA_KEY and codes:
         return ORDER_AREA
-    return ORDER_PERIOD if key == PERIOD_KEY else ORDER_COUNT
+    if key == PERIOD_KEY:
+        return ORDER_PERIOD
+    return ORDER_NUMBER if numbers else ORDER_COUNT
+
+
+def _numbers(counts: Counter[str]) -> dict[str, int]:
+    """値の頭に振られた番号。**過半が番号を持つ軸だけ**が並びに使う。
+
+    指定基準は原文が番号で並んでいる (`一．貝塚、集落跡…` `二．都城跡…`)。
+    件数順にすると `八．` が `七．` の前に来るような並びになり、原文のどこを
+    見ているのか読み手が追えない。**番号は値そのものが持っている**ので、
+    基準の表をサイトに持たずに原文の並びへ戻せる (ADR 0014 / ADR 0015)。
+
+    番号を持たない値が少しは混ざる — 登録有形の登録基準は 3 つとも番号を
+    持たず、天然記念物にも `保護すべき天然記念物に富んだ代表的一定の区域` が
+    ある。**過半で決める**のは、そういう軸を番号順にしつつ、番号らしき値が
+    たまたま 1 つ 2 つ現れた軸を巻き込まないため。
+    """
+    found = {
+        value: number for value in counts if (number := _leading_number(value)) is not None
+    }
+    return found if len(found) * 2 > len(counts) else {}
+
+
+def _leading_number(value: str) -> int | None:
+    found = _LEADING_NUMBER.match(value)
+    return _kanji(found.group(1)) if found else None
+
+
+def _kanji(text: str) -> int | None:
+    """漢数字を数にする。**十二までの表を持たない** — 位取りで読む。
+
+    指定基準の番号は十二までだが、原文が増えたときに表を書き足す作りにはしない。
+    """
+    tens, mark, ones = text.partition("十")
+    if not mark:
+        return _KANJI_DIGITS.get(text)
+    upper = 1 if not tens else _KANJI_DIGITS.get(tens)
+    lower = 0 if not ones else _KANJI_DIGITS.get(ones)
+    if upper is None or lower is None:
+        return None
+    return upper * 10 + lower
 
 
 def _area_codes(rows: list[Row], keys: list[str]) -> dict[str, str]:
@@ -239,9 +291,14 @@ def _area_codes(rows: list[Row], keys: list[str]) -> dict[str, str]:
 
 
 def _order(
-    key: str, counts: Counter[str], medians: dict[str, float], codes: dict[str, str]
+    key: str,
+    counts: Counter[str],
+    medians: dict[str, float],
+    codes: dict[str, str],
+    numbers: dict[str, int],
 ) -> tuple[str, ...]:
-    """値の並び。既定は件数の多い順、地域はコード順、時代は西暦の中央値順。
+    """値の並び。既定は件数の多い順、地域はコード順、時代は西暦の中央値順、
+    番号を持つ値はその番号順。
 
     **地域を件数順に並べない** (Issue #7)。件数順だと探したい県の位置が予測できず、
     しかも件数は更新のたびに動くので、同じ県が先月と違う場所に来る。コードは
@@ -250,11 +307,26 @@ def _order(
     中央値が採れるのは西暦を持つ分類だけ (建造物系の 22 値)。史跡・記念物系の
     「中世」「古代」は西暦を持たないので、年代順の並びの**後ろ**へ件数順で回す。
     混ぜて並べる手はない — 年代の分からない値に位置を与えれば、それは推測になる。
+
+    番号を持たない値も同じく**後ろ**へ件数順で回す。番号が同じ値どうし
+    (天然記念物の `（一）` は動物・植物・地質鉱物の 3 体系に 1 つずつある) は、
+    既定どおり件数の多い順。
     """
     if codes:
         # 桁数を先に見る。コードは 2 桁で揃っているが、揃わなくなっても
         # `10` が `2` の前に来る並びにはしない。
         return tuple(sorted(counts, key=lambda value: (len(codes[value]), codes[value])))
+    if numbers:
+        return tuple(
+            sorted(
+                counts,
+                key=lambda value: (
+                    (0, numbers[value], -counts[value], value)
+                    if value in numbers
+                    else (1, 0, -counts[value], value)
+                ),
+            )
+        )
     if key != PERIOD_KEY:
         return tuple(sorted(counts, key=lambda value: (-counts[value], value)))
     return tuple(
