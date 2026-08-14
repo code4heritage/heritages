@@ -192,6 +192,29 @@ def test_the_index_takes_the_year_from_a_date_of_any_length(data_dir: Path, tmp_
     assert payload["by_key"]["00001235"]["designated_year"] == ""
 
 
+def test_the_checked_date_is_carried_into_the_index(data_dir: Path, tmp_path: Path) -> None:
+    """確認した日はクローラーからもらう。
+
+    **利用日とは別物。** データが変わらなければ利用日は動かないので (取得した日
+    そのものだから)、確認を続けていることは `meta.json` からは分からない。
+    """
+    out = tmp_path / "dist"
+    _build(data_dir, out, checked_date="2026-09-07")
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))
+
+    assert index["checked_date"] == "2026-09-07"
+    # 利用日はデータリポジトリの側が持つ値のまま。確認日に引きずられない。
+    assert index["accessed_dates"]["newest"] == "2026-08-12"
+
+
+def test_no_checked_date_means_no_field(data_dir: Path, tmp_path: Path) -> None:
+    """渡されなければ項目ごと出さない。画面に「不明」と書かせない。"""
+    out = tmp_path / "dist"
+    _build(data_dir, out)
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert "checked_date" not in index
+
+
 def test_the_screen_expects_the_schema_version_the_build_writes() -> None:
     """索引の版を上げたら**画面側の 2 か所も**上げる。
 

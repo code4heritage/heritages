@@ -52,6 +52,26 @@ def test_unreadable_accessed_date_fails(data_dir: Path) -> None:
     assert _errors(_run(data_dir), "accessed_date")
 
 
+def test_a_known_check_date_takes_over_from_the_accessed_date(data_dir: Path) -> None:
+    """確認日が分かるなら、利用日の古さは止める理由にならない。
+
+    利用日は「そのデータを取り出した日」なので、上流が長く変わらなければ古いまま
+    になる — それは正常。**確かめに行けているかどうか**は確認日が持っている。
+    """
+    make_dataset(data_dir, "stale", {"13_tokyo.jsonl": []}, accessed_date="2026-01-01")
+    findings = _run(data_dir, checked_date="2026-08-10")
+    assert not checks.has_errors(findings), [f.message for f in findings]
+
+
+def test_a_stale_check_date_fails(data_dir: Path) -> None:
+    """確認日が古いのは「変わっていない」ではなく「確かめに行けていない」。"""
+    assert _errors(_run(data_dir, checked_date="2026-01-01"), "checked_date")
+
+
+def test_an_unreadable_check_date_fails(data_dir: Path) -> None:
+    assert _errors(_run(data_dir, checked_date="2026年8月10日"), "checked_date")
+
+
 def test_record_count_mismatch_fails(data_dir: Path) -> None:
     make_dataset(
         data_dir,

@@ -1,55 +1,67 @@
-name: 配布物のリリース
+name: 配信と配布
 
-# データを ZIP でまとめ、11 箇所のリリースへ置く (Issue #16)。種別横断の全部入りは
-# このリポジトリへ、種別ごとのぶんは各データリポジトリへ。
+# サイトの配信 (Pages) と配布物のリリースを 1 本にまとめたもの。
 #
-# **Pages とはワークフローごと分けてある。** 配信 (pages.yml) と配布は別の仕事で、
-# 片方の失敗でもう片方を止める理由が無い。
+# **データを取ってくるのは 1 回だけ。** 前は配信と配布が別々に 10 リポジトリを
+# clone していて、2 回のあいだにデータが更新されると**配信と配布で内容がずれる**
+# 余地があった。ここで取ったものを artifact で両方へ配る。
 #
-# **差分のある種別だけリリースを作る。** 月次の差分更新では `meta.json` の利用日
-# だけが動く月がある (ADR 0018)。ここが見ているのは行の中身なので、その月は
-# `has_changes` が偽になり、どこにもリリースが立たない。
+# **ジョブは分けたまま。** `pages` と `release` は準備 (`fetch`) にだけ依存するので、
+# 片方が落ちてももう片方は走る。配信と配布は別の仕事で、片方の失敗でもう片方を
+# 止める理由が無い。
 #
-# 必要な secret は 2 つ。**クローラーの月次更新と同じ GitHub App** (code4heritage
-# org に作り、対象 10 リポジトリにだけ contents:write を与えたもの)。
+# 起こされ方は 3 つ。
 #
-# - DATA_PUSH_CLIENT_ID   … App の Client ID
-# - DATA_PUSH_PRIVATE_KEY … App の秘密鍵 (PEM のまま)
+# - クローラーの週次実行から `workflow_dispatch` (通常の経路。確認日を渡してくる)
+# - main への push (サイトのコードを直したとき。**配布は飛ばす** — データは
+#   変わっていないので、リリースを立てる理由が無い)
+# - 週次の cron (保険。dispatch が届かなかった週に拾う)
 #
-# このリポジトリ自身のリリースは GITHUB_TOKEN で作れる (App は要らない)。
+# 必要な secret は 2 つ。データリポジトリへリリースを作るため、**クローラーの
+# 週次更新と同じ GitHub App** (code4heritage org、対象 10 リポジトリに
+# contents:write) を使う。
+#
+# - DATA_PUSH_CLIENT_ID
+# - DATA_PUSH_PRIVATE_KEY
 
 on:
-  schedule:
-    # 毎月 3 日 07:30 JST。月次の差分更新 (毎月 2 日 03:00 JST) が終わり、
-    # Pages の反映 (07:00 JST) が済んだ後に走らせる。
-    - cron: "30 22 2 * *"
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      dry-run:
-        description: 差分だけ見る (リリースを作らない)
-        type: boolean
-        default: false
+      checked-date:
+        description: データベースを確認した日 (YYYY-MM-DD)。クローラーが渡す
+        type: string
+        default: ""
+  schedule:
+    # 毎週月曜 08:00 JST。クローラーの週次実行 (03:00 JST) が終わっているころ。
+    - cron: "0 23 * * 0"
 
-# 同時に走らせない。同じタグを 2 つの実行が作りにいくのを避ける。走っている回は
-# 途中で止めない — 11 箇所のうち一部だけリリースが立った状態で終わらせないため。
+# 配信も配布も 1 本ずつ。走っている回は途中で止めない (中断すると配信が
+# 中途半端に残り、リリースが一部の種別にだけ立つ)。
 concurrency:
-  group: release
+  group: deliver
   cancel-in-progress: false
 
 permissions:
   contents: write # このリポジトリのリリース
+  pages: write
+  id-token: write
   issues: write # 失敗を残す
 
 env:
   DATA_DIR: data-repos
   OUT_DIR: dist
   ARCHIVE: heritages-jsonl.zip
+  # 確認日は**クローラーしか知らない**。渡されなければリポジトリ変数の値を使う
+  # (クローラーが毎週書き込む) — push で配信し直しただけの回に、画面から
+  # 「最終確認」が消えてしまうのを避ける。
+  CHECKED_DATE: ${{ inputs.checked-date || vars.LAST_CHECKED_DATE }}
 
 jobs:
-  release:
+  fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -60,10 +72,92 @@ jobs:
       - name: ビルドを導入
         run: pip install -e .
 
+      # データリポジトリは public なので github.token で読める (ADR 0015)。
+      # 取得元の commit は sources.txt に残り、配布物の目録に載る。
+      - name: データリポジトリを取得
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-datasets.sh "$DATA_DIR"
+
+      # **壊れた状態で配信も配布もさせない。** 検査を通ったデータだけを先へ送る。
+      # 止めても配信済みのサイトは残る (Pages は最後に成功したデプロイを配り続ける)。
+      - name: 配ってよいデータか確かめる
+        run: heritage-site build --data-dir "$DATA_DIR" --check-only
+
+      # .git は要らない (取得元の commit は sources.txt が持っている)。
+      # 付けたまま上げると artifact が数倍に膨らむ。
+      - name: 履歴を落とす
+        run: find "$DATA_DIR" -mindepth 2 -maxdepth 2 -name .git -type d -exec rm -rf {} +
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: data-repos
+          path: ${{ env.DATA_DIR }}
+          retention-days: 1
+          include-hidden-files: true
+
+  pages:
+    needs: fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: ビルドを導入
+        run: pip install -e .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: data-repos
+          path: ${{ env.DATA_DIR }}
+
+      - name: 組み立て
+        run: |
+          heritage-site build --data-dir "$DATA_DIR" --out "$OUT_DIR" \
+            --checked-date "${CHECKED_DATE:-}"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ env.OUT_DIR }}
+
+  deploy:
+    needs: pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
+
+  release:
+    needs: fetch
+    # サイトのコードを直しただけの回にリリースは要らない (データは変わっていない)。
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: ビルドを導入
+        run: pip install -e .
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: data-repos
+          path: ${{ env.DATA_DIR }}
+
       # 秘密が無いまま進むと、全部入りだけリリースされて 10 個が揃わない状態で
       # 終わる。**相手先へ出る前に**確かめて、不揃いを作らない。
       - name: データリポジトリ用の資格情報があるか確かめる
-        if: inputs.dry-run != true
         env:
           CLIENT_ID: ${{ secrets.DATA_PUSH_CLIENT_ID }}
           PRIVATE_KEY: ${{ secrets.DATA_PUSH_PRIVATE_KEY }}
@@ -71,21 +165,9 @@ jobs:
           set -euo pipefail
           if [ -z "$CLIENT_ID" ] || [ -z "$PRIVATE_KEY" ]; then
             echo "::error::DATA_PUSH_CLIENT_ID / DATA_PUSH_PRIVATE_KEY が無い。" \
-              "クローラーの月次更新と同じ GitHub App の値を登録する"
+              "クローラーの週次更新と同じ GitHub App の値を登録する"
             exit 1
           fi
-
-      # データリポジトリは public なので github.token で読める (ADR 0015)。
-      # 取得元の commit は sources.txt に残り、目録 (MANIFEST.json) に載る。
-      - name: データリポジトリを取得
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/fetch-datasets.sh "$DATA_DIR"
-
-      # **配信を止める不変条件は、そのまま「配ってよいか」の判定になる。**
-      # 壊れたデータを固めて配ると、あとから取り消せない。
-      - name: 配ってよいデータか確かめる
-        run: heritage-site build --data-dir "$DATA_DIR" --check-only
 
       - name: 配布物を固める
         run: |
@@ -131,7 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           changed=$(jq -r '.has_changes' "${OUT_DIR}/changes.json")
-          # 月は日本時間で切る。UTC のままだと月初の実行で 1 日ずれる。
+          # 日付は日本時間で切る。UTC のままだと月初・週初で 1 日ずれる。
           tag="data-$(TZ=Asia/Tokyo date +%Y-%m-%d)"
           echo "tag=${tag}" >>"$GITHUB_OUTPUT"
           echo "changed=${changed}" >>"$GITHUB_OUTPUT"
@@ -141,17 +223,17 @@ jobs:
           fi
 
       - name: 照合値を作る
-        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        if: steps.plan.outputs.changed == 'true'
         run: |
           set -euo pipefail
           cd "$OUT_DIR"
           # checksums.txt 自身は含めない (自分のハッシュは書けない)。
           sha256sum ./*.zip changes.md changes.json >checksums.txt
 
-      # このリポジトリのリリースは GITHUB_TOKEN で作れる。同じタグが既にあるときは
-      # 作り直さない (同じ日に 2 回走ったとき、リリースを二重に立てない)。
+      # 同じタグが既にあるときは作り直さない (同じ日に 2 回走ったとき、リリースを
+      # 二重に立てない)。
       - name: 全部入りをリリースする
-        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        if: steps.plan.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.plan.outputs.tag }}
@@ -172,20 +254,20 @@ jobs:
 
       - name: データリポジトリ用のトークンを発行
         id: token
-        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        if: steps.plan.outputs.changed == 'true'
         uses: actions/create-github-app-token@v3
         with:
           client-id: ${{ secrets.DATA_PUSH_CLIENT_ID }}
           private-key: ${{ secrets.DATA_PUSH_PRIVATE_KEY }}
-          # リポジトリ名を並べない。App のインストール先を 10 リポジトリに絞る
-          # ことで範囲を限る (クローラーの月次更新と同じ考え方)。
+          # リポジトリ名を並べない。App のインストール先を絞ることで範囲を限る
+          # (クローラーの週次更新と同じ考え方)。
           owner: code4heritage
           permission-contents: write
 
       # 対象は sources.txt が持っている (取得したリポジトリそのもの)。**ここにも
       # リポジトリ名の表を書かない** — 種別が増えても減っても、ここは変わらない。
       - name: 種別ごとにリリースする
-        if: steps.plan.outputs.changed == 'true' && inputs.dry-run != true
+        if: steps.plan.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
           TAG: ${{ steps.plan.outputs.tag }}
@@ -219,28 +301,33 @@ jobs:
             echo "リリースを作った種別: ${created}"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
-      # 月次は誰も見ていないところで走る。失敗を Issue に残さないと、配布が
-      # 何か月も止まっていることに気付けない (pages.yml 以外の定期実行と同じ形)。
+  # 誰も見ていないところで走るので、失敗を Issue に残さないと止まっていることに
+  # 気付けない。**どのジョブが落ちても 1 か所にまとめる。**
+  report:
+    needs: [fetch, pages, deploy, release]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
       - name: 失敗を Issue に残す
-        if: failure()
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          title="配布物のリリースが失敗した"
+          title="配信・配布が失敗した"
           {
-            echo "配布物のリリース (\`.github/workflows/release.yml\`) が失敗した。"
-            echo "**データそのものは各データリポジトリにあり、サイトの配信も止まっていない。**"
-            echo "止まっているのは ZIP での配布だけ。"
+            echo "配信・配布 (\`.github/workflows/deliver.yml\`) が失敗した。"
+            echo "**データそのものは各データリポジトリにある。**"
+            echo "配信済みのサイトも、前回のリリースもそのまま残っている。"
             echo
             echo "実行: ${RUN_URL}"
             echo
             echo "手元で追うときは (データリポジトリを並べた親を指す):"
             echo
             echo '```'
-            echo "heritage-site pack --data-dir <親> --out-dir dist"
-            echo "heritage-site diff --data-dir <親> --before <前回の ZIP> --out dist"
+            echo "./scripts/fetch-datasets.sh data-repos"
+            echo "heritage-site build --data-dir data-repos --check-only"
+            echo "heritage-site pack --data-dir data-repos --out-dir dist"
             echo '```'
           } >body.md
 
