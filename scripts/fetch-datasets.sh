@@ -3,6 +3,10 @@
 #
 # **リポジトリ名の表を持たない** (ADR 0015)。org のリポジトリを列挙し、
 # meta.json を持つものだけを残す。種別が増えても減っても、ここもサイトも変わらない。
+#
+# あわせて取得元の commit を `sources.txt` に残す。配布物の目録 (`MANIFEST.json`)
+# に載せて、**どの状態を固めたのかを後から辿れる**ようにするため。`heritage-site`
+# 側から `git` を呼ばずに済むよう、SHA を知っているここで書き出す。
 set -euo pipefail
 
 destination="${1:?取得先のディレクトリが未指定}"
@@ -11,6 +15,8 @@ org="${DATASET_ORG:-code4heritage}"
 skip="${DATASET_SKIP:-heritages}"
 
 mkdir -p "$destination"
+sources="${destination}/sources.txt"
+: >"$sources"
 
 kept=0
 skipped=0
@@ -23,6 +29,7 @@ while read -r name; do
   git clone --depth 1 --quiet "https://github.com/${org}/${name}.git" "${destination}/${name}"
   if [[ -f "${destination}/${name}/meta.json" ]]; then
     kept=$((kept + 1))
+    printf '%s %s\n' "$name" "$(git -C "${destination}/${name}" rev-parse HEAD)" >>"$sources"
   else
     # データの無い器 (ADR 0013) やサイトの補助リポジトリはここで落ちる。
     echo "対象外 (meta.json が無い): ${name}"
