@@ -23,7 +23,7 @@ from .archive import Archive, PackReport, dataset_archive_name, pack
 from .build import BuildReport, build
 from .changes import CHANGES_JSON, NOTES_MARKDOWN, Changes, compare, write_for_dataset
 from .changes import write as write_changes
-from .checks import DEFAULT_MAX_AGE_DAYS, DEFAULT_MAX_MISSING_COORDINATE_RATIO
+from .checks import DEFAULT_MAX_AGE_DAYS
 from .datasets import DataError
 
 _LEVEL_MARK = {"error": "NG", "warning": "警告", "info": "情報"}
@@ -54,7 +54,6 @@ def _build(args: argparse.Namespace) -> int:
         site_dir=args.site_dir,
         checked_date=args.checked_date,
         max_age_days=args.max_age_days,
-        max_missing_coordinate_ratio=args.max_missing_coordinate_ratio,
         write=not args.check_only,
     )
     _report(report, out=args.out, wrote=not args.check_only and not report.failed)
@@ -150,12 +149,6 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_MAX_AGE_DAYS,
         help=f"利用日の許容日数 (既定: {DEFAULT_MAX_AGE_DAYS})",
-    )
-    command.add_argument(
-        "--max-missing-coordinate-ratio",
-        type=float,
-        default=DEFAULT_MAX_MISSING_COORDINATE_RATIO,
-        help=f"座標が無い行の許容割合 (既定: {DEFAULT_MAX_MISSING_COORDINATE_RATIO})",
     )
     command.add_argument(
         "--check-only", action="store_true", help="検査だけ行い、何も書き出さない"

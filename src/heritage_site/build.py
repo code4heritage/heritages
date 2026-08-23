@@ -24,13 +24,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .checks import (
-    DEFAULT_MAX_AGE_DAYS,
-    DEFAULT_MAX_MISSING_COORDINATE_RATIO,
-    Finding,
-    has_errors,
-    in_japan,
-)
+from .checks import DEFAULT_MAX_AGE_DAYS, Finding, has_errors, in_japan
 from .checks import run as run_checks
 from .datasets import (
     DATA_DIRNAME,
@@ -91,7 +85,6 @@ def build(
     today: date | None = None,
     checked_date: str = "",
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
-    max_missing_coordinate_ratio: float = DEFAULT_MAX_MISSING_COORDINATE_RATIO,
     write: bool = True,
 ) -> BuildReport:
     """`data_dir` に並んだデータリポジトリから `out_dir` を作る。
@@ -115,7 +108,6 @@ def build(
         today=today or today_in_japan(),
         checked_date=checked_date,
         max_age_days=max_age_days,
-        max_missing_coordinate_ratio=max_missing_coordinate_ratio,
     )
     report = _summarize(datasets, rows, findings)
     if report.failed or not write:
