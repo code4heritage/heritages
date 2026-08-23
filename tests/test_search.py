@@ -68,4 +68,66 @@ def test_a_query_cannot_match_across_two_fields() -> None:
 
 def test_the_searched_fields_are_the_ones_the_issue_names() -> None:
     """解説文は入れない (部分一致の網にかかりすぎる)。"""
-    assert SEARCH_FIELDS == ("name", "ridge_name", "name_kana", "ridge_name_kana", "address")
+    assert SEARCH_FIELDS == (
+        "name",
+        "ridge_name",
+        "name_kana",
+        "ridge_name_kana",
+        "address",
+        "holders.name",
+        "holders.name_kana",
+        "holders.alias",
+        "holders.alias_kana",
+        "holders.representative",
+        "holders.representative_kana",
+    )
+
+
+def test_the_search_text_reaches_into_the_holders() -> None:
+    """無形文化財は**誰が認定されているか**が主情報ではなく `holders` に入る。
+
+    ここを拾わないと、人間国宝の名前で 1 件も引けない (Issue #23)。
+    """
+    record = {
+        "name": "無名異焼",
+        "holders": [
+            {
+                "kind": "保持者",
+                "name": "伊藤窯一",
+                "name_kana": "いとうよういち",
+                # 芸名・雅号でしか知られていない人がいる。
+                "alias": "五代 伊藤赤水",
+                "alias_kana": "ごだい いとうせきすい",
+                # 認定の日付などは検索の対象にしない。
+                "date": "2003-07-10",
+            }
+        ],
+    }
+    text = search_text(record)
+    assert normalize("伊藤赤水") in text
+    assert normalize("いとうせきすい") in text
+    assert "2003-07-10" not in text
+
+
+def test_every_holder_is_searchable() -> None:
+    """**一覧に出ない保持者でも引ける。**一覧が出すのは先頭 2 件だけ。
+
+    総合認定には 493 人を数えるものがある (琉球舞踊)。名前で探しに来た人が
+    「一覧の先頭 2 人に入っているかどうか」で当たり外れが決まってはいけない。
+    """
+    record = {
+        "name": "琉球舞踊",
+        "holders": [{"name": f"保持者{number}"} for number in range(50)],
+    }
+    text = search_text(record)
+    assert normalize("保持者49") in text
+
+
+def test_a_holder_without_the_field_is_skipped() -> None:
+    """保持団体は代表者を持たないことがある。**組ごと落とさない。**"""
+    record = {
+        "name": "日本産漆生産・精製",
+        "holders": [{"kind": "保持団体", "name": "日本文化財漆協会"}, {"kind": "保持者"}],
+    }
+    # `・` は正規化が落とす (表記の揺れでしかないため)。
+    assert search_text(record) == "日本産漆生産精製\n日本文化財漆協会"

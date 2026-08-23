@@ -25,7 +25,26 @@ from typing import Any
 
 # 検索の対象にする項目 (Issue #32 §2)。解説文は入れない — 部分一致の網に
 # かかりすぎて、名前で引きたい人の邪魔になる。
-SEARCH_FIELDS = ("name", "ridge_name", "name_kana", "ridge_name_kana", "address")
+#
+# **`<キー>.<項目>` は組の中を指す** (Issue #23)。無形文化財と選定保存技術は
+# 誰が認定されているかが主情報ではなく `holders` に入るので、この形が無いと
+# 人間国宝の名前で 1 件も引けない。呼び名を `labels` が `<キー>.<項目>` で
+# 持つ作り (ADR 0014) と同じ書き方に揃えてある。
+SEARCH_FIELDS = (
+    "name",
+    "ridge_name",
+    "name_kana",
+    "ridge_name_kana",
+    "address",
+    # 保持者・保持団体。芸名や雅号でしか知られていない人がいるので、
+    # 戸籍の名前だけでは足りない (`五代 伊藤赤水`)。
+    "holders.name",
+    "holders.name_kana",
+    "holders.alias",
+    "holders.alias_kana",
+    "holders.representative",
+    "holders.representative_kana",
+)
 
 # 項目の区切り。正規化が落とす文字なので、**語がここをまたいで当たることはない**。
 FIELD_SEPARATOR = "\n"
@@ -63,6 +82,26 @@ def search_text(record: Mapping[str, Any]) -> str:
     parts = [
         normalized
         for key in SEARCH_FIELDS
-        if isinstance(value := record.get(key), str) and (normalized := normalize(value))
+        for value in _values(record, key)
+        if (normalized := normalize(value))
     ]
     return FIELD_SEPARATOR.join(parts)
+
+
+def _values(record: Mapping[str, Any], key: str) -> list[str]:
+    """1 項目ぶんの文字列。**組の配列からも拾う** (`holders.name`。Issue #23)。
+
+    1 件が複数の値を持つ — 総合認定には 493 人を数えるものがある。**全員を繋ぐ**
+    ので、一覧に出ない保持者の名前でも引ける (一覧が出すのは先頭 2 件だけ)。
+    """
+    head, _, tail = key.partition(".")
+    value = record.get(head)
+    if not tail:
+        return [value] if isinstance(value, str) else []
+    if not isinstance(value, list):
+        return []
+    return [
+        found
+        for item in value
+        if isinstance(item, dict) and isinstance(found := item.get(tail), str)
+    ]
