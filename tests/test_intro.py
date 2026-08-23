@@ -81,6 +81,17 @@ def test_the_accessed_date_is_explained() -> None:
     assert "取り出した日" in text
 
 
+def test_the_datasets_without_coordinates_are_explained() -> None:
+    """**「座標あり 0 件」は欠損ではない** (Issue #23)。
+
+    列に数字が並ぶ以上、0 は取りこぼしに見える。無形文化財と選定保存技術が
+    人や団体に結び付くもので場所を持たないことは、表の数字からは読み取れない。
+    """
+    text = _text("coordinates-note")
+    assert "場所を持ちません" in text
+    assert "一覧では" in text
+
+
 def test_the_screen_does_not_spell_out_how_the_data_is_fetched() -> None:
     """頻度と取得の方法は画面に出さない。正本はクローラー側 (Issue #5)。"""
     visible = _document().visible
