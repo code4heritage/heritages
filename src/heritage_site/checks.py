@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
@@ -31,14 +31,6 @@ MAX_LONGITUDE = 154.0
 # 「止まったことに気付く」仕掛けはこれしかない (ADR 0018)。月に 1 度の更新に
 # 対して 1 回分の空振りぶんの余裕を見る。
 DEFAULT_MAX_AGE_DAYS = 45
-
-# 座標の欠けは元データの都合で常に一定数ある (実測 373 / 23,856 = 1.6%)。
-# 急に増えたときだけ台帳の取得漏れを疑いたいので、比率で見る。
-DEFAULT_MAX_MISSING_COORDINATE_RATIO = 0.05
-
-# ただし比率だけでは件数の少ないデータセットで暴れる (36 件の特別名勝なら 2 件
-# 欠けただけで 5% を超える)。取得漏れを疑うに足る件数に達するまでは報せるだけ。
-DEFAULT_MIN_MISSING_COORDINATES = 50
 
 _MAX_EXAMPLES = 5
 
@@ -64,8 +56,6 @@ def run(
     today: date,
     checked_date: str = "",
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
-    max_missing_coordinate_ratio: float = DEFAULT_MAX_MISSING_COORDINATE_RATIO,
-    min_missing_coordinates: int = DEFAULT_MIN_MISSING_COORDINATES,
 ) -> list[Finding]:
     findings: list[Finding] = []
     findings += _check_schema_version(datasets)
@@ -76,12 +66,7 @@ def run(
     findings += _check_counts(datasets, rows)
     findings += _check_required_fields(datasets, rows)
     findings += _check_shared_keys(datasets, rows)
-    findings += _check_coordinates(
-        datasets,
-        rows,
-        max_ratio=max_missing_coordinate_ratio,
-        minimum=min_missing_coordinates,
-    )
+    findings += _check_coordinates(datasets, rows)
     return findings
 
 
@@ -328,14 +313,21 @@ def _check_shared_keys(datasets: list[Dataset], rows: list[Row]) -> list[Finding
     ]
 
 
-def _check_coordinates(
-    datasets: list[Dataset], rows: list[Row], *, max_ratio: float, minimum: int
-) -> list[Finding]:
+def _check_coordinates(datasets: list[Dataset], rows: list[Row]) -> list[Finding]:
     """座標の欠けと、日本の外周から外れた座標。
 
     **座標が無い行を黙って落とさない** (Issue #32)。地図に出せないだけで、一覧には
     出す。ここで数えるのは「元データがどれだけ地図に出せないか」を毎回見える形に
     残すため。
+
+    **欠けの多さでは配信を止めない** (Issue #23)。無形文化財と選定保存技術は人や
+    団体に結び付くもので場所を持たず (4 種別・321 件が 1 件も座標を持たない)、
+    美術工芸品には所有者が公開されていない行が 7,114 件ある。欠け率はその種別の
+    性質であって、取得漏れの証拠ではない — 26 種別を 1 本の閾値では表せない。
+
+    取得漏れはクローラー側の網羅性検査 (`report-ledger` の異なり数) が名指しで
+    捕まえ、「途中で落ちた」「メタだけ更新された」は `meta.json` の宣言と実際の
+    突き合わせ (`_check_counts`) が捕まえる。**同じ事実を 2 か所で守らない。**
     """
     missing = [row for row in rows if not row.has_coordinates]
     outside = [
@@ -346,26 +338,15 @@ def _check_coordinates(
         and not in_japan(row.latitude, row.longitude)
     ]
 
-    findings: list[Finding] = []
     ratio = len(missing) / len(rows) if rows else 0.0
-    if ratio > max_ratio and len(missing) >= minimum:
-        findings.append(
-            Finding(
-                "coordinates",
-                "error",
-                f"座標の無い行が {len(missing)} 件 ({ratio:.1%}) で上限 {max_ratio:.1%} を超えた"
-                " — 台帳の取得漏れを疑う",
-                tuple(_describe(datasets, row) for row in missing[:_MAX_EXAMPLES]),
-            )
+    findings = [
+        Finding(
+            "coordinates",
+            "info",
+            f"座標の無い行が {len(missing)} 件 ({ratio:.1%})。一覧には出し、地図には出さない",
+            _missing_by_dataset(datasets, rows, missing),
         )
-    else:
-        findings.append(
-            Finding(
-                "coordinates",
-                "info",
-                f"座標の無い行が {len(missing)} 件 ({ratio:.1%})。一覧には出し、地図には出さない",
-            )
-        )
+    ]
     if outside:
         findings.append(
             Finding(
@@ -381,6 +362,27 @@ def _check_coordinates(
             )
         )
     return findings
+
+
+def _missing_by_dataset(
+    datasets: list[Dataset], rows: list[Row], missing: list[Row]
+) -> tuple[str, ...]:
+    """欠けの内訳を種別ごとに、欠け率の高い順。**26 種別を全部は並べない。**
+
+    **1 件も持たない種別を書き分ける。**そこは元データに座標が無いのであって、
+    取りこぼしたのではない — 数字だけ並べても、その違いは報告から読み取れない。
+    """
+    total: Counter[int] = Counter(row.dataset_index for row in rows)
+    absent: Counter[int] = Counter(row.dataset_index for row in missing)
+    ranked = sorted(
+        absent,
+        key=lambda index: (-absent[index] / total[index], -absent[index], datasets[index].repo),
+    )
+    return tuple(
+        f"{datasets[index].repo}: {absent[index]}/{total[index]} 件"
+        + ("（1 件も座標を持たない種別）" if absent[index] == total[index] else "")
+        for index in ranked[:_MAX_EXAMPLES]
+    )
 
 
 def _describe(datasets: list[Dataset], row: Row) -> str:

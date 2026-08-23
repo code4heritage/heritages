@@ -150,21 +150,57 @@ def test_same_key_repeated_inside_one_dataset_is_not_a_conflict(data_dir: Path) 
     assert not _errors(_run(data_dir), "shared_keys")
 
 
-def test_missing_coordinates_beyond_the_ratio_fails(data_dir: Path) -> None:
-    findings = _run(data_dir, max_missing_coordinate_ratio=0.0, min_missing_coordinates=0)
-    assert _errors(findings, "coordinates")
+def _without_coordinates(data_dir: Path) -> None:
+    """場所に結び付かない種別 (無形文化財)。座標も所在地も 1 件も持たない。"""
+    make_dataset(
+        data_dir,
+        "important-intangible-cultural-properties",
+        {
+            "99_unspecified.jsonl": [
+                record("303", "00000279", name="無名異焼"),
+                record("303", "00000280", name="小鹿田焼"),
+            ]
+        },
+        name="重要無形文化財",
+    )
 
 
-def test_missing_coordinates_within_the_ratio_only_reports(data_dir: Path) -> None:
-    findings = _run(data_dir, max_missing_coordinate_ratio=0.5, min_missing_coordinates=0)
-    reported = [f for f in findings if f.check == "coordinates"]
-    assert [f.level for f in reported] == ["info"]
+def test_a_dataset_without_any_coordinates_does_not_fail(data_dir: Path) -> None:
+    """欠け率で配信を止めない (Issue #23)。
 
-
-def test_a_few_missing_coordinates_do_not_fail_a_small_dataset(data_dir: Path) -> None:
-    """件数の少ないデータセットでは比率が暴れる。件数の裏付けが要る。"""
-    findings = _run(data_dir, max_missing_coordinate_ratio=0.0)
+    無形文化財と選定保存技術は人や団体に結び付くもので場所を持たない。**種別の
+    性質であって取得漏れの証拠ではない**ので、1 件も座標が無い種別が加わっても通す。
+    """
+    _without_coordinates(data_dir)
+    findings = _run(data_dir)
     assert not _errors(findings, "coordinates")
+    assert not checks.has_errors(findings), [f.message for f in findings]
+
+
+def test_missing_coordinates_are_reported_by_dataset(data_dir: Path) -> None:
+    """止めない代わりに、**どの種別がどれだけ欠けているか**は毎回報告に出す。"""
+    _without_coordinates(data_dir)
+    reported = [f for f in _run(data_dir) if f.check == "coordinates"]
+    assert [f.level for f in reported] == ["info"]
+    assert any(
+        "important-intangible-cultural-properties" in example and "1 件も座標を持たない" in example
+        for example in reported[0].examples
+    )
+
+
+def test_a_wrong_coordinate_count_still_fails(data_dir: Path) -> None:
+    """座標を守る役目は `meta.json` の宣言との突き合わせが引き継ぐ。
+
+    欠け率では止めないが、**取得が途中で落ちれば宣言と実際がずれる**ので、
+    そこで配信が止まる。
+    """
+    make_dataset(
+        data_dir,
+        "half-fetched",
+        {"13_tokyo.jsonl": [record("101", "00000001")]},
+        counts={"records": 1, "files": 1, "with_coordinates": 1},
+    )
+    assert _errors(_run(data_dir), "counts")
 
 
 def test_coordinates_outside_japan_warn_without_failing(data_dir: Path) -> None:
