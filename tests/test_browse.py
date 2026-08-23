@@ -21,9 +21,19 @@ RECORDS_JS = Path(__file__).resolve().parents[1] / "site/records.js"
 # `_records_payload`)。
 PAYLOAD: dict[str, Any] = {
     "schema_version": 3,
-    "datasets": ["national-treasures", "historic-sites", "places-of-scenic-beauty"],
+    "datasets": [
+        "national-treasures",
+        "historic-sites",
+        "places-of-scenic-beauty",
+        "important-intangible-cultural-properties",
+    ],
     # データセットごとの JSON Lines。行は番号でここを指す (build.py の `files`)。
-    "files": [["data/26_kyoto.jsonl"], ["data/13_tokyo.jsonl"], ["data/13_tokyo.jsonl"]],
+    "files": [
+        ["data/26_kyoto.jsonl"],
+        ["data/13_tokyo.jsonl"],
+        ["data/13_tokyo.jsonl"],
+        ["data/99_unspecified.jsonl"],
+    ],
     "search_fields": ["name", "ridge_name", "name_kana", "ridge_name_kana", "address"],
     "axes": [
         # 横断の軸は体系のまとまりを持たない (Issue #8)。
@@ -52,7 +62,7 @@ PAYLOAD: dict[str, Any] = {
         "managed_id",
         "name",
         "ridge_name",
-        "address",
+        "place",
         "designated_year",
         "url",
         "latitude",
@@ -69,13 +79,14 @@ def _record(
     managed_id: str,
     name: str,
     kana: str,
-    address: str,
+    place: str,
     facets: list[list[int]],
     *,
     line: int = 1,
     coordinates: tuple[float, float] | None = (35.0, 135.7),
 ) -> list[Any]:
     latitude, longitude = coordinates if coordinates else (None, None)
+    # `place` は所在地とは限らない — 所蔵館・所有者・保持者のこともある (Issue #23)。
     return [
         dataset,
         0,
@@ -84,12 +95,12 @@ def _record(
         managed_id,
         name,
         "",
-        address,
+        place,
         "1951",
         f"https://kunishitei.bunka.go.jp/heritage/detail/102/{managed_id}",
         latitude,
         longitude,
-        f"{kana}\n{address}",
+        f"{kana}\n{place}",
         facets,
     ]
 
@@ -103,6 +114,9 @@ PAYLOAD["records"] = [
     _record(2, "4", "庭園", "ていえん", "東京都", [[2], [2, 0]]),
     # 同じ棟が別の種別にも現れる (複合指定。ADR 0012)。キーが同じで種別が違う。
     _record(1, "4", "庭園", "ていえん", "東京都", [[2], [2, 0]], line=2),
+    # 場所に結び付かない種別 (Issue #23)。所在地の代わりに保持者が手掛かりになり、
+    # 所在都道府県の軸にも値を持たない。
+    _record(3, "5", "無名異焼", "むみょういやき", "伊藤赤水", [[], []], coordinates=None),
 ]
 
 # index.json のデータセット。呼び名も項目の呼び名も置き場も meta.json が正本 (ADR 0014)。
@@ -121,6 +135,17 @@ DATASETS = [
         "repo": "places-of-scenic-beauty",
         "path": "datasets/places-of-scenic-beauty",
         "meta": {"dataset": {"name": "名勝"}, "labels": {"name": "名称"}},
+    },
+    # 座標を 1 件も持たない種別。**行からは分からない**ので `meta.json` が数えた
+    # 件数で判別する (Issue #23)。
+    {
+        "repo": "important-intangible-cultural-properties",
+        "path": "datasets/important-intangible-cultural-properties",
+        "meta": {
+            "dataset": {"name": "重要無形文化財"},
+            "labels": {"name": "名称"},
+            "counts": {"records": 1, "with_coordinates": 0},
+        },
     },
 ]
 
@@ -141,6 +166,7 @@ const answers = queries.map(({{ query, selection }}) => {{
     datasets: matched.map((index) => catalog.record(index).dataset),
     mappable: matched.map((index) => catalog.record(index).mappable),
     siblings: matched.map((index) => catalog.record(index).siblings),
+    placelessOnly: catalog.placelessOnly(matched),
     counts: Object.fromEntries(catalog.axes.map((axis, position) => [axis.key, counts[position]])),
     axes: catalog.axes.map((axis) => ({{
       key: axis.key,
@@ -174,13 +200,13 @@ def test_the_dataset_becomes_the_first_axis(node: str) -> None:
     """
     [answer] = _ask(node, [{}])
     assert [axis["key"] for axis in answer["axes"]] == ["dataset", "prefecture", "types"]
-    assert answer["axes"][0]["values"] == ["国宝（建造物）", "史跡", "名勝"]
+    assert answer["axes"][0]["values"] == ["国宝（建造物）", "史跡", "名勝", "重要無形文化財"]
 
 
 def test_an_empty_query_matches_everything(node: str) -> None:
     """複合指定は行として 2 つある。片方を隠すと、その種別で絞ったときに消える。"""
     [answer] = _ask(node, [{}])
-    assert answer["names"] == ["金堂", "五重塔", "社殿", "庭園", "庭園"]
+    assert answer["names"] == ["金堂", "五重塔", "社殿", "庭園", "庭園", "無名異焼"]
 
 
 def test_the_query_matches_the_normalized_text(node: str) -> None:
@@ -222,7 +248,7 @@ def test_counts_ignore_the_selection_on_their_own_axis(node: str) -> None:
 def test_counts_follow_the_query_too(node: str) -> None:
     [answer] = _ask(node, [{"query": "奈良市"}])
     assert answer["counts"]["prefecture"] == [0, 1, 0]
-    assert answer["counts"]["dataset"] == [1, 0, 0]
+    assert answer["counts"]["dataset"] == [1, 0, 0, 0]
 
 
 def test_a_row_without_coordinates_is_still_listed(node: str) -> None:
@@ -230,6 +256,27 @@ def test_a_row_without_coordinates_is_still_listed(node: str) -> None:
     [answer] = _ask(node, [{"query": "ごじゅうのとう"}])
     assert answer["names"] == ["五重塔"]
     assert answer["mappable"] == [False]
+
+
+def test_a_selection_of_placeless_datasets_is_named(node: str) -> None:
+    """地図が空になった理由を、種別の性質か所在地の非公開かで言い分ける材料。
+
+    **行からは分からない** — 1 件ずつ見ても「この行に座標が無い」までしか言えず、
+    種別の性質かどうかは `meta.json` が数えた件数にしか出ていない (Issue #23)。
+    """
+    [intangible, everything, without_coordinates] = _ask(
+        node,
+        [
+            {"selection": {"dataset": [3]}},
+            {},
+            # 座標は無いが、**座標を持つ種別**の行。ここを取り違えると
+            # 「この種別は場所に結び付かない」と誤って言い切ってしまう。
+            {"query": "ごじゅうのとう"},
+        ],
+    )
+    assert intangible["placelessOnly"] is True
+    assert everything["placelessOnly"] is False
+    assert without_coordinates["placelessOnly"] is False
 
 
 def test_a_shared_building_names_the_other_datasets(node: str) -> None:
