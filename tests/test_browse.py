@@ -451,7 +451,7 @@ def test_a_cross_cutting_axis_is_not_grouped(node: str) -> None:
 
 
 def test_a_short_axis_is_left_alone(node: str) -> None:
-    """3 値の「指定 / 登録 / 選定」は体系に張り付いているが、はじめから全部見える。
+    """5 値の「指定 / 登録 / 選択 / 選定 / 認定」は体系に張り付いているが、全部見える。
 
     見出しを 3 つ足しても読む量が増えるだけなので、畳まずまとめず素通しする。
     """
