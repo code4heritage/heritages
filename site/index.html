@@ -35,12 +35,17 @@
 
         <div id="browse" hidden>
           <form class="search" role="search" onsubmit="return false">
-            <label for="search">名称・ふりがな・棟名・所在地から</label>
+            <!--
+              保持者・保持団体も対象 (Issue #23)。無形文化財と選定保存技術は
+              誰が認定されているかが主情報ではなく `holders` に入るので、ここを
+              引けないと人間国宝の名前で 1 件も当たらない。
+            -->
+            <label for="search">名称・ふりがな・棟名・所在地・保持者から</label>
             <input
               id="search"
               type="search"
               autocomplete="off"
-              placeholder="例: 東大寺 / とうだいじ / 京都市"
+              placeholder="例: 東大寺 / とうだいじ / 京都市 / 伊藤赤水"
             />
             <button id="reset" type="button">条件を消す</button>
           </form>
