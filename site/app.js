@@ -15,7 +15,7 @@ const INDEX_URL = "./index.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
 // 食い違ったまま描くと画面のどこかが黙って空になるので、先に止める。
-const SUPPORTED_SCHEMA_VERSION = 4;
+const SUPPORTED_SCHEMA_VERSION = 5;
 
 const NUMBER_FORMAT = new Intl.NumberFormat("ja-JP");
 
@@ -93,6 +93,10 @@ async function startMap(catalog) {
       map: document.getElementById("map"),
       tiles: document.getElementById("map-tiles"),
       summary: document.getElementById("map-summary"),
+      // 地図に出せる行が 0 件の回に畳む先 (Issue #23)。組み立てに失敗したときと
+      // 畳む先が同じなので、指す場所も 1 つにしておく。
+      frame: document.getElementById("map-frame"),
+      tilesField: document.getElementById("map-tiles-field"),
     });
   } catch (error) {
     const failed = document.getElementById("map-error");

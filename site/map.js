@@ -12,6 +12,7 @@
 
 import { CELL_SIZE, cluster, countMappable } from "./cluster.js";
 import { createDetailBlock } from "./detail.js";
+import { summaryText } from "./summary.js";
 import {
   DomUtil,
   Layer,
@@ -100,8 +101,19 @@ export function createMapView(catalog, elements) {
 
   return {
     show(matched) {
+      const mappable = countMappable(positions, matched);
       layer.show(matched);
-      renderSummary(elements.summary, countMappable(positions, matched), matched.length);
+      // **地図に出せる行が 1 つも無い回は、地図そのものを畳む** (Issue #23)。
+      // 無形文化財だけを選んだ読み手の前に白紙の日本地図を置いても意味が無い。
+      // 一覧は生きているので、行き先を summary が示す。
+      const empty = mappable === 0;
+      elements.frame.hidden = empty;
+      elements.tilesField.hidden = empty;
+      renderSummary(elements.summary, mappable, matched.length, {
+        // 空になった理由は種別から言える。`meta.json` が「座標を 1 件も持たない」と
+        // 言っている種別だけなら、それは取りこぼしではなく性質。
+        placeless: empty && catalog.placelessOnly(matched),
+      });
     },
   };
 }
@@ -146,13 +158,8 @@ function renderTileChooser(container, onChange) {
   );
 }
 
-function renderSummary(element, mappable, matched) {
-  const parts = [`${NUMBER_FORMAT.format(mappable)} 件を地図に表示`];
-  const missing = matched - mappable;
-  // 位置を持たない行を黙って落とさない (Issue #32 §3)。数を示して、一覧の
-  // 「地図に位置がない」へ繋ぐ。
-  if (missing > 0) parts.push(`${NUMBER_FORMAT.format(missing)} 件は位置がないので一覧のみ`);
-  element.textContent = parts.join(" / ");
+function renderSummary(element, mappable, matched, options) {
+  element.textContent = summaryText(mappable, matched, options);
 }
 
 // 点を描く canvas のレイヤ。
@@ -336,7 +343,7 @@ function showRecord(map, catalog, positions, index) {
 
   const meta = document.createElement("p");
   meta.className = "record-meta";
-  meta.textContent = [record.dataset, record.address, record.designatedYear]
+  meta.textContent = [record.dataset, record.place, record.designatedYear]
     .filter(Boolean)
     .join(" / ");
 

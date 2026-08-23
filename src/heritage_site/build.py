@@ -44,8 +44,10 @@ from .search import SEARCH_FIELDS
 # 入った — 体系ごとに別の語彙が 1 本の軸に混ざる軸を、画面が畳んでまとめるため
 # (Issue #8)。4 で最終確認日 (`checked_date`) が入った — 利用日が「データを取得した
 # 日」になり、変更が無い週は動かなくなったので、**確認していること自体を示す日付が
-# 別に要る**ようになった。
-SITE_SCHEMA_VERSION = 4
+# 別に要る**ようになった。5 で `address` が `place` になった — 所在地を持たない種別が
+# 加わり (無形文化財・選定保存技術)、列の意味が「所在地」から「居場所の手掛かり」へ
+# 広がった (Issue #23)。
+SITE_SCHEMA_VERSION = 5
 
 DATASETS_DIRNAME = "datasets"
 INDEX_FILENAME = "index.json"
@@ -249,7 +251,7 @@ def _records_payload(
             "managed_id",
             "name",
             "ridge_name",
-            "address",
+            "place",
             "designated_year",
             "url",
             "latitude",
@@ -266,7 +268,7 @@ def _records_payload(
                 row.managed_id,
                 row.name,
                 row.ridge_name,
-                row.address,
+                row.place,
                 row.designated_year,
                 row.url,
                 row.latitude if _mappable(row) else None,

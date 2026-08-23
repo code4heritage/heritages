@@ -248,7 +248,7 @@ function item(record, load) {
 
   const meta = document.createElement("p");
   meta.className = "record-meta";
-  const parts = [record.dataset, record.address, record.designatedYear].filter(Boolean);
+  const parts = [record.dataset, record.place, record.designatedYear].filter(Boolean);
   meta.textContent = parts.join(" / ");
 
   element.append(heading, meta);

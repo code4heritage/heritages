@@ -14,7 +14,7 @@ import { normalize } from "./normalize.js";
 const RECORDS_URL = "./records.json";
 
 // ビルドが書く索引のスキーマ版 (build.py の SITE_SCHEMA_VERSION)。
-const SUPPORTED_SCHEMA_VERSION = 4;
+const SUPPORTED_SCHEMA_VERSION = 5;
 
 // データセット (種別) は絞り込みの主軸だが、meta.json の facets には出てこない。
 // 種別横断のサイトなので、ここだけは索引の datasets から軸を作る。
@@ -45,8 +45,20 @@ export function createCatalog(payload, datasets = [], { source = createRecordSou
   const info = new Map(
     datasets.map(({ repo, path, meta }) => [
       repo,
-      { name: meta?.dataset?.name ?? repo, path, labels: meta?.labels ?? {} },
+      {
+        name: meta?.dataset?.name ?? repo,
+        path,
+        labels: meta?.labels ?? {},
+        // 座標を 1 件も持たない種別 (無形文化財・選定保存技術)。地図が空になった
+        // 理由を言い分けるのに使う (Issue #23)。**行からは分からない** — 1 件ずつ
+        // 見ても「この行に座標が無い」までしか言えず、種別の性質かどうかは
+        // `meta.json` が数えた件数にしか出ていない。
+        placeless: meta?.counts?.with_coordinates === 0,
+      },
     ]),
+  );
+  const placeless = new Set(
+    payload.datasets.flatMap((repo, number) => (info.get(repo)?.placeless ? [number] : [])),
   );
   // 複合指定 (同じ棟が複数の種別に現れる) の相手。**要るまで作らない** —
   // 2 万行を数える手間を、詳細を 1 件も開かない読み手に払わせない。
@@ -119,6 +131,11 @@ export function createCatalog(payload, datasets = [], { source = createRecordSou
       const repo = payload.datasets[record[column.dataset]];
       return fieldsOf(await source.read(place), info.get(repo)?.labels ?? {});
     },
+    // 絞り込まれた行が**すべて**場所に結び付かない種別か。地図が空のとき、
+    // それが種別の性質なのか所在地の非公開なのかを言い分ける (Issue #23)。
+    placelessOnly: (matched) =>
+      matched.length > 0 &&
+      matched.every((index) => placeless.has(records[index][column.dataset])),
     filter: (query, selection) => filter(records, axes, column.search, query, selection),
   };
 }
@@ -148,7 +165,8 @@ function describe(record, column, repos, info, siblingsOf) {
     managedId: record[column.managed_id],
     name: record[column.name],
     ridgeName: record[column.ridge_name],
-    address: record[column.address],
+    // **所在地とは限らない** — 所蔵館・所有者・保持者のこともある (Issue #23)。
+    place: record[column.place],
     designatedYear: record[column.designated_year],
     url: record[column.url],
     latitude: record[column.latitude],

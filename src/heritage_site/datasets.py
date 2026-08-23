@@ -19,6 +19,12 @@ META_FILENAME = "meta.json"
 DATA_DIRNAME = "data"
 DATA_SUFFIX = ".jsonl"
 
+# 居場所の手掛かりを探す順 (`_place`)。**所在地が無い種別がある** (Issue #23)。
+PLACE_KEYS = ("address", "storage_facility", "owner")
+
+# 一覧の 1 行に並べる保持者の数。残りは「ほか N 件」に畳む。
+HOLDERS_SHOWN = 2
+
 # サイトが読める `meta.json` / JSON Lines のスキーマ版。データ側が先に進んだら
 # 黙って壊れるのではなく、ビルドを失敗させて気付く (Issue #32 の不変条件)。
 SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
@@ -83,7 +89,9 @@ class Row:
     latitude: float | None
     longitude: float | None
     ridge_name: str
-    address: str
+    place: str
+    """一覧と地図の吹き出しに出す手掛かり。**所在地とは限らない** (Issue #23)。"""
+
     designated_year: str
     western_year: str
     search: str
@@ -244,7 +252,7 @@ def _row(
         latitude=latitude,
         longitude=longitude,
         ridge_name=_text(record.get("ridge_name")),
-        address=_text(record.get("address")),
+        place=_place(record),
         # 日付は 4 / 7 / 10 文字の可変長 (原文にそこまでしか無いことがある)。
         # 先頭 4 文字がどの長さでも年になる。
         designated_year=_text(record.get("designated_date"))[:4],
@@ -266,6 +274,43 @@ def values_of(record: Any, key: str) -> tuple[str, ...]:
     if isinstance(value, list):
         return tuple(item for item in value if isinstance(item, str) and item)
     return ()
+
+
+def _place(record: dict[str, Any]) -> str:
+    """その行の居場所にあたるもの。**所在地が無い行でも空欄にしない** (Issue #23)。
+
+    無形文化財と選定保存技術は場所に結び付かず、美術工芸品には所有者が公開されて
+    いない行が 7,114 ある。一覧が「種別 / 年」だけになるより、その行が持っている
+    もので居場所を示す方が探せる — 所蔵館、所有者、そして**誰が認定されているか**。
+    """
+    for key in PLACE_KEYS:
+        if value := _text(record.get(key)):
+            return value
+    return _holders(record)
+
+
+def _holders(record: dict[str, Any]) -> str:
+    """保持者・保持団体の名前。**無形文化財ではこれが所在地の代わりになる。**
+
+    総合認定には 493 人を数えるものがある (琉球舞踊)。一覧の 1 行には並べられ
+    ないので先頭だけを出し、残りは数で示す — 詳細を開けば全員が表で読める。
+    """
+    holders = record.get("holders")
+    if not isinstance(holders, list):
+        return ""
+    names: list[str] = []
+    for item in holders:
+        if not isinstance(item, dict):
+            continue
+        # 保持団体は代表者ではなく団体そのものが名乗る (`name`)。個人の認定と
+        # 混ざるので、どちらの形でも拾う。
+        if name := _text(item.get("name")) or _text(item.get("representative")):
+            names.append(name)
+    if not names:
+        return ""
+    rest = len(names) - HOLDERS_SHOWN
+    shown = "、".join(names[:HOLDERS_SHOWN])
+    return shown if rest <= 0 else f"{shown} ほか {rest} 件"
 
 
 def _text(value: Any) -> str:
