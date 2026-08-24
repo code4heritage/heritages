@@ -16,6 +16,8 @@ from typing import Any
 from .search import search_text
 
 META_FILENAME = "meta.json"
+# 週次が毎回書く来歴 (ADR 0023)。**ルートに置かれる** — `data/` の下ではない。
+STATUS_FILENAME = "status.json"
 DATA_DIRNAME = "data"
 DATA_SUFFIX = ".jsonl"
 
@@ -45,6 +47,17 @@ class Dataset:
     repo: str
     root: Path
     meta: dict[str, Any]
+    status: dict[str, Any] | None = None
+    """`status.json` の中身。週次が一度も回っていないリポジトリでは `None`。"""
+
+    @property
+    def checked_date(self) -> Any:
+        """データベースを見にいった最後の日 (ADR 0023)。
+
+        **利用日とは別物。** データが変わらなければ利用日は動かないので、
+        確かめ続けていること自体はこちらでしか分からない。
+        """
+        return (self.status or {}).get("checked_date")
 
     @property
     def name(self) -> str:
@@ -154,10 +167,37 @@ def discover(data_dir: Path) -> list[Dataset]:
         meta_path = entry / META_FILENAME
         if not meta_path.is_file():
             continue
-        datasets.append(Dataset(repo=entry.name, root=entry, meta=_read_meta(meta_path)))
+        status_path = entry / STATUS_FILENAME
+        datasets.append(
+            Dataset(
+                repo=entry.name,
+                root=entry,
+                meta=_read_json(meta_path),
+                status=_read_json(status_path) if status_path.is_file() else None,
+            )
+        )
     if not datasets:
         raise DataError(f"{META_FILENAME} を持つデータセットが 1 つも無い: {data_dir}")
     return datasets
+
+
+def oldest_checked_date(datasets: Sequence[Dataset]) -> str:
+    """全データセットが確かめられた日 = 各 `status.json` の確認日の**最小値**。
+
+    **一番古い日を採るのが要。** どれか 1 つへの push が落ちた週は、その
+    リポジトリだけ確認日が進まない。新しい方を採ると「全部確かめた」と読めて
+    しまい、止まっていることが隠れる。
+
+    `status.json` を持たないデータセットは除く (週次が一度も回っていない器は
+    ありうる)。欠けていること自体は `checks` が warning で報せる。
+    1 つも無ければ空文字 — 画面に「不明」と書かせないため (`build`)。
+    """
+    dates = [
+        dataset.checked_date
+        for dataset in datasets
+        if isinstance(dataset.checked_date, str) and dataset.checked_date
+    ]
+    return min(dates) if dates else ""
 
 
 def data_files(dataset: Dataset) -> list[Path]:
@@ -195,7 +235,7 @@ def location(datasets: list[Dataset], row: Row) -> str:
     return f"{datasets[row.dataset_index].repo}/{row.path}:{row.line}"
 
 
-def _read_meta(path: Path) -> dict[str, Any]:
+def _read_json(path: Path) -> dict[str, Any]:
     try:
         meta = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:

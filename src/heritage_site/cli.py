@@ -52,7 +52,6 @@ def _build(args: argparse.Namespace) -> int:
         args.data_dir,
         args.out,
         site_dir=args.site_dir,
-        checked_date=args.checked_date,
         max_age_days=args.max_age_days,
         write=not args.check_only,
     )
@@ -136,11 +135,6 @@ def _parser() -> argparse.ArgumentParser:
     command = subparsers.add_parser("build", help="配信するディレクトリを組み立てる")
     command.add_argument("--data-dir", type=Path, required=True, help=_DATA_DIR_HELP)
     command.add_argument("--out", type=Path, default=Path("dist"), help="出力先 (既定: dist)")
-    command.add_argument(
-        "--checked-date",
-        default="",
-        help="データベースを確認した日 (YYYY-MM-DD)。クローラーが渡す。省略すると出さない",
-    )
     command.add_argument(
         "--site-dir", type=Path, default=Path("site"), help="静的ファイルの置き場 (既定: site)"
     )

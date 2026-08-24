@@ -16,6 +16,8 @@ from typing import Any
 import pytest
 
 DEFAULT_ACCESSED_DATE = "2026-08-12"
+# 確認日は週次が毎回書く (ADR 0023)。利用日と違い、データが動かない週も進む。
+DEFAULT_CHECKED_DATE = "2026-08-12"
 
 INDEX_HTML = Path(__file__).resolve().parents[1] / "site" / "index.html"
 
@@ -98,6 +100,7 @@ def make_dataset(
     declared_files: list[dict[str, Any]] | None = None,
     facets: dict[str, dict[str, int]] | None = None,
     labels: dict[str, str] | None = None,
+    checked_date: str | None = None,
     write_meta: bool = True,
 ) -> Path:
     root = data_dir / repo
@@ -144,6 +147,21 @@ def make_dataset(
     (root / "meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+
+    # 確認日はここから読む (ADR 0023)。**渡されたときだけ書く** — 週次が一度も
+    # 回っていないリポジトリには `status.json` が無いので、その形も試せるようにする。
+    if checked_date is not None:
+        status = {
+            "schema_version": schema_version,
+            "repo": repo,
+            "checked_date": checked_date,
+            "accessed_date": accessed_date,
+            "changed": False,
+            "records": len(rows),
+        }
+        (root / "status.json").write_text(
+            json.dumps(status, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
     return root
 
 
@@ -181,6 +199,7 @@ def data_dir(tmp_path: Path) -> Path:
             ],
         },
         name="国宝（建造物）",
+        checked_date=DEFAULT_CHECKED_DATE,
     )
     make_dataset(
         directory,
@@ -192,6 +211,7 @@ def data_dir(tmp_path: Path) -> Path:
             ],
         },
         name="特別史跡",
+        checked_date=DEFAULT_CHECKED_DATE,
     )
     make_dataset(
         directory,
@@ -202,5 +222,6 @@ def data_dir(tmp_path: Path) -> Path:
             ],
         },
         name="特別名勝",
+        checked_date=DEFAULT_CHECKED_DATE,
     )
     return directory

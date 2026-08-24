@@ -72,6 +72,23 @@ def test_an_unreadable_check_date_fails(data_dir: Path) -> None:
     assert _errors(_run(data_dir, checked_date="2026年8月10日"), "checked_date")
 
 
+def test_a_dataset_without_a_status_file_is_reported(data_dir: Path) -> None:
+    """確認日を持たないデータセットは、静かに全体の判定から外れる。
+
+    確認日は一番古い日を採るので (`datasets.checked_date`)、`status.json` が
+    欠けていても日付は新しいまま出る。**欠けに気付けるよう warning で報せる** —
+    配信を止めるほどではない (週次が一度も回っていない器はありうる)。
+    """
+    make_dataset(data_dir, "fresh-repo", {"13_tokyo.jsonl": []})
+    findings = _run(data_dir)
+    assert [f for f in findings if f.check == "status" and f.level == "warning"]
+    assert not checks.has_errors(findings), [f.message for f in findings]
+
+
+def test_a_status_file_everywhere_says_nothing(data_dir: Path) -> None:
+    assert not [f for f in _run(data_dir) if f.check == "status"]
+
+
 def test_record_count_mismatch_fails(data_dir: Path) -> None:
     make_dataset(
         data_dir,

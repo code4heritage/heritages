@@ -193,22 +193,25 @@ def test_the_index_takes_the_year_from_a_date_of_any_length(data_dir: Path, tmp_
 
 
 def test_the_checked_date_is_carried_into_the_index(data_dir: Path, tmp_path: Path) -> None:
-    """確認した日はクローラーからもらう。
+    """確認した日は各データリポジトリの `status.json` から読む (ADR 0023)。
 
     **利用日とは別物。** データが変わらなければ利用日は動かないので (取得した日
     そのものだから)、確認を続けていることは `meta.json` からは分からない。
     """
     out = tmp_path / "dist"
-    _build(data_dir, out, checked_date="2026-09-07")
+    _build(data_dir, out)
     index = json.loads((out / "index.json").read_text(encoding="utf-8"))
 
-    assert index["checked_date"] == "2026-09-07"
+    assert index["checked_date"] == "2026-08-12"
     # 利用日はデータリポジトリの側が持つ値のまま。確認日に引きずられない。
     assert index["accessed_dates"]["newest"] == "2026-08-12"
 
 
-def test_no_checked_date_means_no_field(data_dir: Path, tmp_path: Path) -> None:
-    """渡されなければ項目ごと出さない。画面に「不明」と書かせない。"""
+def test_no_checked_date_means_no_field(tmp_path: Path) -> None:
+    """`status.json` がどこにも無ければ項目ごと出さない。画面に「不明」と書かせない。"""
+    data_dir = tmp_path / "data-repos"
+    data_dir.mkdir()
+    make_dataset(data_dir, "no-status", {"13_tokyo.jsonl": [record("101", "00000001")]})
     out = tmp_path / "dist"
     _build(data_dir, out)
     index = json.loads((out / "index.json").read_text(encoding="utf-8"))
@@ -242,8 +245,12 @@ def test_build_is_deterministic(data_dir: Path, tmp_path: Path) -> None:
 
 
 def test_failed_checks_write_nothing(data_dir: Path, tmp_path: Path) -> None:
-    """壊れた索引で上書きするより、既に配信されているものを残す方が安全。"""
-    make_dataset(data_dir, "stale", {"13_tokyo.jsonl": []}, accessed_date="2020-01-01")
+    """壊れた索引で上書きするより、既に配信されているものを残す方が安全。
+
+    壊し方は「確認日が古い」— 更新が止まったことに気付く仕掛けそのもの
+    (利用日はデータが変わらなければ古いままなので、止める理由にならない)。
+    """
+    make_dataset(data_dir, "behind", {"13_tokyo.jsonl": []}, checked_date="2020-01-01")
     out = tmp_path / "dist"
     report = _build(data_dir, out)
     assert report.failed  # type: ignore[attr-defined]
