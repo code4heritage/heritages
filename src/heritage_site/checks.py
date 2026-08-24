@@ -17,7 +17,14 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
-from .datasets import SUPPORTED_SCHEMA_VERSIONS, Dataset, Row, data_files, location
+from .datasets import (
+    STATUS_FILENAME,
+    SUPPORTED_SCHEMA_VERSIONS,
+    Dataset,
+    Row,
+    data_files,
+    location,
+)
 
 Level = Literal["error", "warning", "info"]
 
@@ -62,6 +69,7 @@ def run(
     findings += _check_accessed_date(
         datasets, today=today, max_age_days=max_age_days, checked_date=checked_date
     )
+    findings += _check_status_files(datasets)
     findings += _check_files(datasets)
     findings += _check_counts(datasets, rows)
     findings += _check_required_fields(datasets, rows)
@@ -147,6 +155,27 @@ def _check_accessed_date(
         )
     findings += _check_checked_date(today=today, max_age_days=max_age_days, value=checked_date)
     return findings
+
+
+def _check_status_files(datasets: list[Dataset]) -> list[Finding]:
+    """`status.json` を持たないデータセットを報せる。
+
+    確認日は一番古い日を採るので (`datasets.oldest_checked_date`)、欠けている
+    リポジトリは判定から**静かに外れる** — 日付は新しいまま出てしまう。
+    **止めるほどではない** (週次が一度も回っていない器はありうる) ので warning。
+    """
+    missing = [dataset.repo for dataset in datasets if dataset.status is None]
+    if not missing:
+        return []
+    return [
+        Finding(
+            "status",
+            "warning",
+            f"{STATUS_FILENAME} を持たないデータセットが {len(missing)} 件"
+            " — 確認日の判定から外れている",
+            tuple(missing[:_MAX_EXAMPLES]),
+        )
+    ]
 
 
 def _check_checked_date(*, today: date, max_age_days: int, value: str) -> list[Finding]:

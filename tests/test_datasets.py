@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 from conftest import make_dataset, record
-from heritage_site.datasets import DataError, Dataset, discover, iter_rows
+from heritage_site.datasets import (
+    DataError,
+    Dataset,
+    discover,
+    iter_rows,
+    oldest_checked_date,
+)
 
 
 def test_discover_lists_datasets_in_repository_name_order(data_dir: Path) -> None:
@@ -27,6 +33,42 @@ def test_discover_skips_directories_without_meta(data_dir: Path) -> None:
         write_meta=False,
     )
     assert "preservation-districts" not in [dataset.repo for dataset in discover(data_dir)]
+
+
+def test_the_checked_date_comes_from_the_data(data_dir: Path) -> None:
+    """確認日はデータと一緒に旅する (ADR 0023)。外から渡さない。"""
+    assert oldest_checked_date(discover(data_dir)) == "2026-08-12"
+
+
+def test_the_checked_date_is_the_oldest_one(data_dir: Path) -> None:
+    """**一番古い日を採る** — そこまでは全種別が確かめられている、と言えるため。
+
+    どれか 1 つの push が落ちた週は、そのリポジトリだけ確認日が進まない。
+    新しい方を採ると「全部確かめた」と読めてしまう。
+    """
+    make_dataset(
+        data_dir,
+        "behind",
+        {"13_tokyo.jsonl": []},
+        checked_date="2026-08-05",
+    )
+    assert oldest_checked_date(discover(data_dir)) == "2026-08-05"
+
+
+def test_a_dataset_without_a_status_file_is_skipped(data_dir: Path) -> None:
+    """週次が一度も回っていないリポジトリは日付を持たない。
+
+    無い値で全体を空にはしない (それは `checks` が warning で報せる)。
+    """
+    make_dataset(data_dir, "fresh-repo", {"13_tokyo.jsonl": []})
+    assert oldest_checked_date(discover(data_dir)) == "2026-08-12"
+
+
+def test_no_status_file_anywhere_means_no_checked_date(tmp_path: Path) -> None:
+    directory = tmp_path / "data-repos"
+    directory.mkdir()
+    make_dataset(directory, "lonely", {"13_tokyo.jsonl": []})
+    assert oldest_checked_date(discover(directory)) == ""
 
 
 def test_discover_rejects_a_directory_without_any_dataset(tmp_path: Path) -> None:

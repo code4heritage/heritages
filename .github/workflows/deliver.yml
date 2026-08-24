@@ -12,7 +12,7 @@ name: 配信と配布
 #
 # 起こされ方は 3 つ。
 #
-# - クローラーの週次実行から `workflow_dispatch` (通常の経路。確認日を渡してくる)
+# - クローラーの週次実行から `workflow_dispatch` (通常の経路。押したあとに起こされる)
 # - main への push (サイトのコードを直したとき。**配布は飛ばす** — データは
 #   変わっていないので、リリースを立てる理由が無い)
 # - 週次の cron (保険。dispatch が届かなかった週に拾う)
@@ -28,11 +28,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      checked-date:
-        description: データベースを確認した日 (YYYY-MM-DD)。クローラーが渡す
-        type: string
-        default: ""
   schedule:
     # 毎週月曜 08:00 JST。クローラーの週次実行 (03:00 JST) が終わっているころ。
     - cron: "0 23 * * 0"
@@ -53,10 +48,6 @@ env:
   DATA_DIR: data-repos
   OUT_DIR: dist
   ARCHIVE: heritages-jsonl.zip
-  # 確認日は**クローラーしか知らない**。渡されなければリポジトリ変数の値を使う
-  # (クローラーが毎週書き込む) — push で配信し直しただけの回に、画面から
-  # 「最終確認」が消えてしまうのを避ける。
-  CHECKED_DATE: ${{ inputs.checked-date || vars.LAST_CHECKED_DATE }}
 
 jobs:
   fetch:
@@ -115,10 +106,11 @@ jobs:
           name: data-repos
           path: ${{ env.DATA_DIR }}
 
+      # **確認日はデータが持っている** — 各データリポジトリのルートの
+      # `status.json` を読む (ADR 0023)。起こされ方によらず同じ値になるので、
+      # push で配信し直しただけの回にも画面の「最終確認」が保たれる。
       - name: 組み立て
-        run: |
-          heritage-site build --data-dir "$DATA_DIR" --out "$OUT_DIR" \
-            --checked-date "${CHECKED_DATE:-}"
+        run: heritage-site build --data-dir "$DATA_DIR" --out "$OUT_DIR"
 
       - uses: actions/upload-pages-artifact@v5
         with:

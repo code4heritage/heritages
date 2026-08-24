@@ -34,6 +34,7 @@ from .datasets import (
     data_files,
     discover,
     iter_rows,
+    oldest_checked_date,
 )
 from .facets import Axis, axis_keys, build_axes, positions
 from .search import SEARCH_FIELDS
@@ -85,7 +86,6 @@ def build(
     *,
     site_dir: Path,
     today: date | None = None,
-    checked_date: str = "",
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
     write: bool = True,
 ) -> BuildReport:
@@ -95,6 +95,9 @@ def build(
     既に配信されているものを残す方が安全 (`checks` の方針)。
     """
     datasets = discover(data_dir)
+    # 確認日はデータと一緒に旅する (ADR 0023)。**外から渡さない** — 変数や入力で
+    # 運んでいた頃は、配信し直しただけの回に古い値が残った。
+    checked_date = oldest_checked_date(datasets)
     # どの軸で絞り込めるかは `meta.json` が決める (ADR 0014)。行を読む前に
     # 決まっていなければ、行から軸の値を拾えない。
     keys = axis_keys(datasets)
@@ -160,8 +163,9 @@ def _index_payload(
     そのまま画面に出る。種別が増えてもここは変わらない (ADR 0015)。
 
     `checked_date` だけは `meta.json` に無い — **データベースを見にいった日**は
-    クローラーしか知らず、変更が無ければデータには痕跡が残らないため、組み立てる
-    ときに外から渡す。空なら項目ごと出さない (「不明」を表示しない)。
+    週次だけが知っていて、変更が無ければ `meta.json` には痕跡が残らないため、
+    各リポジトリのルートの `status.json` から読む (ADR 0023)。
+    空なら項目ごと出さない (「不明」を表示しない)。
     """
     accessed = sorted(
         str(dataset.accessed_date) for dataset in datasets if dataset.accessed_date
